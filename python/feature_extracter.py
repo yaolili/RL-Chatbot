@@ -20,13 +20,6 @@ word_vector.wv.save_word2vec_format(u"model/word_vector.bin", binary=True)
 word_vector = KeyedVectors.load_word2vec_format('model/word_vector.bin', binary=True)
 print("Time Elapsed: {} secs\n".format(time.time() - ts))
 
-""" Extract only the vocabulary part of the data """
-def refine(data):
-    words = re.findall("[a-zA-Z'-]+", data)
-    words = ["".join(word.split("'")) for word in words]
-    # words = ["".join(word.split("-")) for word in words]
-    data = ' '.join(words)
-    return data
 
 ts = time.time()
 conversations = []

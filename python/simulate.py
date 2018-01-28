@@ -39,13 +39,6 @@ n_decode_lstm_step = 22
 
 batch_size = 1
 
-""" Extract only the vocabulary part of the data """
-def refine(data):
-    words = re.findall("[a-zA-Z'-]+", data)
-    words = ["".join(word.split("'")) for word in words]
-    # words = ["".join(word.split("-")) for word in words]
-    data = ' '.join(words)
-    return data
 
 def generate_question_vector(state, word_vector, dim_wordvec, n_encode_lstm_step):
     state = [refine(w) for w in state.lower().split()]

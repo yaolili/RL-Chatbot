@@ -18,15 +18,6 @@ def preProBuildWordVocab(word_count_threshold=5, all_words_path=config.all_words
     corpus = open(all_words_path, 'r').read().split('\n')[:-1]
     captions = np.asarray(corpus, dtype=np.object)
 
-    captions = map(lambda x: x.replace('.', ''), captions)
-    captions = map(lambda x: x.replace(',', ''), captions)
-    captions = map(lambda x: x.replace('"', ''), captions)
-    captions = map(lambda x: x.replace('\n', ''), captions)
-    captions = map(lambda x: x.replace('?', ''), captions)
-    captions = map(lambda x: x.replace('!', ''), captions)
-    captions = map(lambda x: x.replace('\\', ''), captions)
-    captions = map(lambda x: x.replace('/', ''), captions)
-
     print('preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold))
     word_counts = {}
     nsents = 0
@@ -74,14 +65,6 @@ def parse_all_words(all_words_path):
             utterance = line[-1]
             f.write(utterance + '\n')
 
-""" Extract only the vocabulary part of the data """
-def refine(data):
-    words = re.findall("[a-zA-Z'-]+", data)
-    words = ["".join(word.split("'")) for word in words]
-    # words = ["".join(word.split("-")) for word in words]
-    data = ' '.join(words)
-    return data
-
 if __name__ == '__main__':
     parse_all_words(config.all_words_path)
 
@@ -94,6 +77,6 @@ if __name__ == '__main__':
             line_ID = line[0]
             utterance = line[-1]
             utterance_dict[line_ID] = utterance
-            utterance = " ".join([refine(w) for w in utterance.lower().split()])
+            utterance = " ".join([w for w in utterance.lower().split()])
             f.write(utterance + '\n')
     pickle.dump(utterance_dict, open('data/utterance_dict', 'wb'), True)

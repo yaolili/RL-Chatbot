@@ -3,7 +3,7 @@
 import tensorflow as tf
 import numpy as np
 
-class Seq2Seq_chatbot():
+class Kw_chatbot():
     def __init__(self, dim_wordvec, n_words, dim_hidden, batch_size, n_encode_lstm_step, n_decode_lstm_step, bias_init_vector=None, lr=0.0001):
         self.dim_wordvec = dim_wordvec
         self.dim_hidden = dim_hidden
@@ -28,8 +28,18 @@ class Seq2Seq_chatbot():
         else:
             self.embed_word_b = tf.Variable(tf.zeros([n_words]), name='embed_word_b')
 
+        # keywords params
+        self.keywords_W = tf.Variable(tf.random_uniform([dim_wordvec, dim_hidden], -0.1, 0.1), name='keywords_W')
+        self.keywords_b = tf.Variable(tf.zeros([dim_hidden]), name='keywords_b')
+
+
     def build_model(self):
         word_vectors = tf.placeholder(tf.float32, [self.batch_size, self.n_encode_lstm_step, self.dim_wordvec])
+
+        # add keyword embedding from pretrain X input
+        kw_vectors = tf.placeholder(tf.float32, [self.batch_size, self.dim_wordvec])
+        kw_info = tf.nn.xw_plus_b(kw_vectors, self.keywords_W, self.keywords_b)
+
 
         caption = tf.placeholder(tf.int32, [self.batch_size, self.n_decode_lstm_step+1])
         caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_decode_lstm_step+1])
@@ -65,7 +75,9 @@ class Seq2Seq_chatbot():
             tf.get_variable_scope().reuse_variables()
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1(padding, state1)
+                # here I replace "padding" with "kw_info"
+                # FIXME: whether the first time step should be padding or not?
+                output1, state1 = self.lstm1(kw_info, state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)
@@ -103,6 +115,11 @@ class Seq2Seq_chatbot():
         wordvec_emb = tf.nn.xw_plus_b(word_vectors_flat, self.encode_vector_W, self.encode_vector_b)
         wordvec_emb = tf.reshape(wordvec_emb, [1, self.n_encode_lstm_step, self.dim_hidden])
 
+        # add keyword embedding from pretrain X input
+        kw_vectors = tf.placeholder(tf.float32, [1, self.dim_wordvec])
+        kw_info = tf.nn.xw_plus_b(kw_vectors, self.keywords_W, self.keywords_b)
+
+
         state1 = tf.zeros([1, self.lstm1.state_size])
         state2 = tf.zeros([1, self.lstm2.state_size])
         padding = tf.zeros([1, self.dim_hidden])
@@ -126,11 +143,13 @@ class Seq2Seq_chatbot():
             tf.get_variable_scope().reuse_variables()
 
             if i == 0:
-                #with tf.device('/cpu:0'):
+                # with tf.device('/cpu:0'):
+                # bos
                 current_embed = tf.nn.embedding_lookup(self.Wemb, tf.ones([1], dtype=tf.int64))
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1(padding, state1)
+                # here I replace "placeholder" with "kw_info"
+                output1, state1 = self.lstm1(kw_info, state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)

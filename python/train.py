@@ -8,14 +8,18 @@ import data_parser
 import config
 
 from model import Seq2Seq_chatbot
+
 import tensorflow as tf
 import numpy as np
 
 import os
 import time
 
+from utils import make_batch_X, make_batch_Y
+
 
 ### Global Parameters ###
+pretrain_emb = config.pretrain_emb
 checkpoint = config.CHECKPOINT
 model_path = config.train_model_path
 model_name = config.train_model_name
@@ -24,67 +28,20 @@ start_epoch = config.start_epoch
 word_count_threshold = config.WC_threshold
 
 ### Train Parameters ###
-dim_wordvec = 300
-dim_hidden = 1000
+learning_rate = config.learning_rate
+dim_wordvec = config.dim_wordvec
+dim_hidden = config.dim_hidden
 
-n_encode_lstm_step = 22 + 22
-n_decode_lstm_step = 22
+n_encode_lstm_step = config.n_encode_lstm_step
+n_decode_lstm_step = config.n_decode_lstm_step
 
-epochs = 500
-batch_size = 100
-learning_rate = 0.0001
+epochs = config.max_epochs
+batch_size = config.batch_size
 
-
-def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncating='pre', value=0.):
-    if not hasattr(sequences, '__len__'):
-        raise ValueError('`sequences` must be iterable.')
-    lengths = []
-    for x in sequences:
-        if not hasattr(x, '__len__'):
-            raise ValueError('`sequences` must be a list of iterables. '
-                             'Found non-iterable: ' + str(x))
-        lengths.append(len(x))
-
-    num_samples = len(sequences)
-    if maxlen is None:
-        maxlen = np.max(lengths)
-
-    # take the sample shape from the first non empty sequence
-    # checking for consistency in the main loop below.
-    sample_shape = tuple()
-    for s in sequences:
-        if len(s) > 0:
-            sample_shape = np.asarray(s).shape[1:]
-            break
-
-    x = (np.ones((num_samples, maxlen) + sample_shape) * value).astype(dtype)
-    for idx, s in enumerate(sequences):
-        if not len(s):
-            continue  # empty list/array was found
-        if truncating == 'pre':
-            trunc = s[-maxlen:]
-        elif truncating == 'post':
-            trunc = s[:maxlen]
-        else:
-            raise ValueError('Truncating type "%s" not understood' % truncating)
-
-        # check `trunc` has expected shape
-        trunc = np.asarray(trunc, dtype=dtype)
-        if trunc.shape[1:] != sample_shape:
-            raise ValueError('Shape of sample %s of sequence at position %s is different from expected shape %s' %
-                             (trunc.shape[1:], idx, sample_shape))
-
-        if padding == 'post':
-            x[idx, :len(trunc)] = trunc
-        elif padding == 'pre':
-            x[idx, -len(trunc):] = trunc
-        else:
-            raise ValueError('Padding type "%s" not understood' % padding)
-    return x
 
 def train():
     wordtoix, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
-    word_vector = KeyedVectors.load_word2vec_format('model/word_vector.bin', binary=True)
+    word_vector = KeyedVectors.load_word2vec_format(pretrain_emb, binary=True)
 
     model = Seq2Seq_chatbot(
             dim_wordvec=dim_wordvec,
@@ -111,7 +68,7 @@ def train():
         print("Restart training...")
         tf.global_variables_initializer().run()
 
-    dr = Data_Reader()
+    dr = Data_Reader(config.training_data_path)
 
     for epoch in range(start_epoch, epochs):
         n_batch = dr.get_batch_num(batch_size)
@@ -119,57 +76,8 @@ def train():
             start_time = time.time()
 
             batch_X, batch_Y = dr.generate_training_batch(batch_size)
-
-            for i in range(len(batch_X)):
-                batch_X[i] = [word_vector[w] if w in word_vector else np.zeros(dim_wordvec) for w in batch_X[i]]
-                # batch_X[i].insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
-                if len(batch_X[i]) > n_encode_lstm_step:
-                    batch_X[i] = batch_X[i][:n_encode_lstm_step]
-                else:
-                    for _ in range(len(batch_X[i]), n_encode_lstm_step):
-                        batch_X[i].append(np.zeros(dim_wordvec))
-
-            current_feats = np.array(batch_X)
-            # print('current_feats.shape', current_feats.shape)
-
-            current_captions = batch_Y
-            current_captions = map(lambda x: '<bos> ' + x, current_captions)
-            current_captions = map(lambda x: x.replace('.', ''), current_captions)
-            current_captions = map(lambda x: x.replace(',', ''), current_captions)
-            current_captions = map(lambda x: x.replace('"', ''), current_captions)
-            current_captions = map(lambda x: x.replace('\n', ''), current_captions)
-            current_captions = map(lambda x: x.replace('?', ''), current_captions)
-            current_captions = map(lambda x: x.replace('!', ''), current_captions)
-            current_captions = map(lambda x: x.replace('\\', ''), current_captions)
-            current_captions = map(lambda x: x.replace('/', ''), current_captions)
-
-            for idx, each_cap in enumerate(current_captions):
-                word = each_cap.lower().split(' ')
-                if len(word) < n_decode_lstm_step:
-                    current_captions[idx] = current_captions[idx] + ' <eos>'
-                else:
-                    new_word = ''
-                    for i in range(n_decode_lstm_step-1):
-                        new_word = new_word + word[i] + ' '
-                    current_captions[idx] = new_word + '<eos>'
-
-            current_caption_ind = []
-            for cap in current_captions:
-                current_word_ind = []
-                for word in cap.lower().split(' '):
-                    if word in wordtoix:
-                        current_word_ind.append(wordtoix[word])
-                    else:
-                        current_word_ind.append(wordtoix['<unk>'])
-                current_caption_ind.append(current_word_ind)
-
-            current_caption_matrix = pad_sequences(current_caption_ind, padding='post', maxlen=n_decode_lstm_step)
-            current_caption_matrix = np.hstack([current_caption_matrix, np.zeros([len(current_caption_matrix), 1])]).astype(int)
-            current_caption_masks = np.zeros((current_caption_matrix.shape[0], current_caption_matrix.shape[1]))
-            nonzeros = np.array(map(lambda x: (x != 0).sum() + 1, current_caption_matrix))
-
-            for ind, row in enumerate(current_caption_masks):
-                row[:nonzeros[ind]] = 1
+            current_feats = make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector)
+            current_caption_matrix, current_caption_masks = make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step)
 
             if batch % 100 == 0:
                 _, loss_val = sess.run(
