@@ -28,18 +28,13 @@ class Seq2Seq_chatbot():
         else:
             self.embed_word_b = tf.Variable(tf.zeros([n_words]), name='embed_word_b')
 
-    # flag = true, use X, Y to calculate loss; flag = false, use X, loss from external
-    def build_model(self, flag=True):
+
+    def build_model(self):
         word_vectors = tf.placeholder(tf.float32, [self.batch_size, self.n_encode_lstm_step, self.dim_wordvec])
 
-        if flag:
-            caption = tf.placeholder(tf.int32, [self.batch_size, self.n_decode_lstm_step+1])
-            caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_decode_lstm_step+1])
-            loss = 0.0
-        else:
-            # loss is a scalar
-            loss = tf.placeholder(tf.float32, shape=(), name="loss")
-
+        caption = tf.placeholder(tf.int32, [self.batch_size, self.n_decode_lstm_step+1])
+        caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_decode_lstm_step+1])
+        loss = 0.0
 
         word_vectors_flat = tf.reshape(word_vectors, [-1, self.dim_wordvec])
         wordvec_emb = tf.nn.xw_plus_b(word_vectors_flat, self.encode_vector_W, self.encode_vector_b ) # (batch_size*n_encode_lstm_step, dim_hidden)

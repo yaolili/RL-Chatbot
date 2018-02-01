@@ -9,7 +9,7 @@ import copy
 
 sys.path.append("python")
 from model import Seq2Seq_chatbot
-from utils import make_batch_X, make_batch_Y
+from utils import make_batch_X, make_batch_Y, get_pmi_kw, get_textRank_kw
 from data_reader import Data_Reader
 import data_parser
 import config
@@ -69,17 +69,6 @@ def index2sentence(generated_word_index, prob_logit, ixtoword):
     
     return generated_words
 
-# TODO
-def keywords_generator(query, keywords_num):
-    # current query
-
-    # history context
-
-    # new topic
-
-    pass
-
-
 
 # TODO
 def count_rewards(query, sess_reply, cur_depth, total_depth, cur_reward):
@@ -92,17 +81,12 @@ def count_rewards(query, sess_reply, cur_depth, total_depth, cur_reward):
 
 
 def train():
-    # TODO 
     wordtoix, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
     word_vector = KeyedVectors.load_word2vec_format('model/word_vector.bin', binary=True)
-
-    
-    ones_reward = np.ones([batch_size, n_decode_lstm_step])
+    # ones_reward = np.ones([batch_size, n_decode_lstm_step])
 
     g1 = tf.Graph()
-
     default_graph = tf.get_default_graph() 
-
     with g1.as_default():
         model = Seq2Seq_chatbot(
                 dim_wordvec=dim_wordvec,
@@ -149,15 +133,13 @@ def train():
                                 dim_wordvec=dim_wordvec,
                                 word_vector=word_vector)
 
-
-                
                 # rl action: generate batch_size sents
                 action_word_indexs, action_probs, action_embs = sess.run([generated_words, probs, embs],
                     feed_dict={
                        word_vectors: current_feats
                     })
-                    action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)
-                    action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
+                action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)
+                action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
 
                     # Here I use the last encoder hidden state as the representation of query
                     query = np.array(enc_feats['encode_states'][-1]).reshape(batch_size, dim_hidden)
