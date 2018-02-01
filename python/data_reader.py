@@ -47,9 +47,10 @@ class Data_Reader:
         batch_index = self.generate_batch_index(batch_size)
         batch_X = [self.training_data[i][0] for i in batch_index]   # batch_size of conv_a
         batch_Y = [self.training_data[i][1] for i in batch_index]   # batch_size of conv_b
-        former = [self.training_data[i][2] for i in batch_index]    # batch_size of former utterance
+        former = [self.training_data[i][2] for i in batch_index]    # batch_size of former 
+        kw = [self.training_data[i][3] for i in batch_index]        # batch_size of kw
 
-        return batch_X, batch_Y, former
+        return batch_X, batch_Y, former, kw
 
     def generate_testing_batch(self, batch_size):
         batch_index = self.generate_batch_index(batch_size)

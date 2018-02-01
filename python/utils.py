@@ -1,6 +1,17 @@
 # coding=utf-8
 
 from __future__ import print_function
+import numpy as np
+import jieba.analyse
+import codecs
+import jieba
+import config
+
+# Load noun tables, pmi co-table as global variable
+keywords = codecs.open(config.all_nouns_path).readlines()
+keywords = [item.strip().split()[0] for item in keywords]
+with open(config.pmi_dict_path, "rb") as fin:
+    co_table = pickle.load(fin)
 
 
 def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncating='pre', value=0.):
@@ -94,3 +105,38 @@ def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):
         row[:nonzeros[ind]] = 1
 
     return current_caption_matrix, current_caption_masks
+
+
+def get_pmi_kw(sentence, topK=1):
+    query_words = sentence.strip().split()
+    result = []
+    pmi_score = []
+    for keyword in keywords:
+        pmiall=0.0
+        for q_word in query_words:
+            cur_key = q_word + '-' + keyword
+            fre_q_word = co_table.get(q_word, 0.0)
+            fre_keyword = co_table.get(keyword, 0.0)
+            fre_key = co_table.get(cur_key, 0.0)
+            if fre_q_word != 0 and fre_keyword != 0:
+                pmi = fre_key / (fre_q_word * fre_keyword)
+            else:
+                pmi = 0.0
+            pmiall += pmi
+        pmi_score.append(pmiall)
+
+    # Here select topK keywords. As topK usually k << logN, so use topK*N instead of N*logN    
+    for i in range(topK):
+        max_index = pmi_score.index(max(pmi_score))
+        result.append(keywords(max_index))
+        pmi_score[max_index] = -1
+    return result
+
+
+def get_textRank_kw(sentence, topK=1):
+    result = []
+    for x, w in jieba.analyse.textrank(sentence, topK = topK, withWeight = True):
+        result.append(x)
+    return result
+
+

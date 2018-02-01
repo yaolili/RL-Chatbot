@@ -19,11 +19,11 @@ from utils import make_batch_X, make_batch_Y
 
 
 ### Global Parameters ###
-training_data_path = config.training_data_path
+training_data_path = config.reverseed_data_path 
 pretrain_emb = config.pretrain_emb
 checkpoint = config.CHECKPOINT
-model_path = config.train_model_path
-model_name = config.train_model_name
+model_path = config.reversed_model_path
+model_name = config.reversed_model_name
 start_epoch = config.start_epoch
 
 word_count_threshold = config.WC_threshold

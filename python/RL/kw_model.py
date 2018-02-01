@@ -13,8 +13,8 @@ class Kw_chatbot():
         self.n_decode_lstm_step = n_decode_lstm_step
         self.lr = lr
 
-        #with tf.device("/cpu:0"):
-        self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
+        with tf.device("/cpu:0"):
+            self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
         self.lstm1 = tf.contrib.rnn.BasicLSTMCell(dim_hidden, state_is_tuple=False)
         self.lstm2 = tf.contrib.rnn.BasicLSTMCell(dim_hidden, state_is_tuple=False)
@@ -69,8 +69,8 @@ class Kw_chatbot():
 
         ############################# Decoding Stage ######################################
         for i in range(0, self.n_decode_lstm_step):
-            #with tf.device("/cpu:0"):
-            current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
+            with tf.device("/cpu:0"):
+                current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
 
             tf.get_variable_scope().reuse_variables()
 
@@ -106,7 +106,7 @@ class Kw_chatbot():
             'entropies': entropies
         }
 
-        return train_op, loss, word_vectors, caption, caption_mask, inter_value
+        return train_op, loss, word_vectors, kw_vectors, caption, caption_mask, inter_value
 
     def build_generator(self):
         word_vectors = tf.placeholder(tf.float32, [1, self.n_encode_lstm_step, self.dim_wordvec])
@@ -143,9 +143,8 @@ class Kw_chatbot():
             tf.get_variable_scope().reuse_variables()
 
             if i == 0:
-                # with tf.device('/cpu:0'):
-                # bos
-                current_embed = tf.nn.embedding_lookup(self.Wemb, tf.ones([1], dtype=tf.int64))
+                with tf.device('/cpu:0'):
+                    current_embed = tf.nn.embedding_lookup(self.Wemb, tf.ones([1], dtype=tf.int64))
 
             with tf.variable_scope("LSTM1"):
                 # here I replace "placeholder" with "kw_info"
@@ -159,8 +158,8 @@ class Kw_chatbot():
             generated_words.append(max_prob_index)
             probs.append(logit_words)
 
-            #with tf.device("/cpu:0"):
-            current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
+            with tf.device("/cpu:0"):
+                current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
             current_embed = tf.expand_dims(current_embed, 0)
 
             embeds.append(current_embed)

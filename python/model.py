@@ -28,11 +28,18 @@ class Seq2Seq_chatbot():
         else:
             self.embed_word_b = tf.Variable(tf.zeros([n_words]), name='embed_word_b')
 
-    def build_model(self):
+    # flag = true, use X, Y to calculate loss; flag = false, use X, loss from external
+    def build_model(self, flag=True):
         word_vectors = tf.placeholder(tf.float32, [self.batch_size, self.n_encode_lstm_step, self.dim_wordvec])
 
-        caption = tf.placeholder(tf.int32, [self.batch_size, self.n_decode_lstm_step+1])
-        caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_decode_lstm_step+1])
+        if flag:
+            caption = tf.placeholder(tf.int32, [self.batch_size, self.n_decode_lstm_step+1])
+            caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_decode_lstm_step+1])
+            loss = 0.0
+        else:
+            # loss is a scalar
+            loss = tf.placeholder(tf.float32, shape=(), name="loss")
+
 
         word_vectors_flat = tf.reshape(word_vectors, [-1, self.dim_wordvec])
         wordvec_emb = tf.nn.xw_plus_b(word_vectors_flat, self.encode_vector_W, self.encode_vector_b ) # (batch_size*n_encode_lstm_step, dim_hidden)
@@ -44,7 +51,6 @@ class Seq2Seq_chatbot():
 
         probs = []
         entropies = []
-        loss = 0.0
 
         ##############################  Encoding Stage ##################################
         for i in range(0, self.n_encode_lstm_step):
@@ -56,6 +62,7 @@ class Seq2Seq_chatbot():
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
+
 
         ############################# Decoding Stage ######################################
         for i in range(0, self.n_decode_lstm_step):

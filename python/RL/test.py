@@ -36,13 +36,6 @@ n_decode_lstm_step = 22
 
 batch_size = 1
 
-""" Extract only the vocabulary part of the data """
-def refine(data):
-    words = re.findall("[a-zA-Z'-]+", data)
-    words = ["".join(word.split("'")) for word in words]
-    # words = ["".join(word.split("-")) for word in words]
-    data = ' '.join(words)
-    return data
 
 def test(model_path=default_model_path):
     testing_data = open(testing_data_path, 'r').read().split('\n')
