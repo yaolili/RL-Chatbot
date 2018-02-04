@@ -62,4 +62,6 @@ reversed_WC_threshold = 5
 MAX_TURNS = 5
 
 # reward coefficient
-alpha = 0.5
+alpha1 = 0.25
+alpha2 = 0.25
+alpha3 = 0.5

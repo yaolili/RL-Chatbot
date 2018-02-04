@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 import numpy as np
+import cPickle as pkl
 import jieba.analyse
 import codecs
 import jieba
@@ -11,7 +12,30 @@ import config
 keywords = codecs.open(config.all_nouns_path).readlines()
 keywords = [item.strip().split()[0] for item in keywords]
 with open(config.pmi_dict_path, "rb") as fin:
-    co_table = pickle.load(fin)
+    co_table = pkl.load(fin)
+
+
+def index2sentence(generated_word_index, prob_logit, ixtoword):
+    generated_words = []
+    for cur_ind in generated_word_index:
+        # pad 0, bos 1, eos 2, unk 3
+        if cur_ind == 2: break
+        
+        '''
+        # remove <unk> <pad> <bos> to second high prob. word
+        if cur_ind <= 3:
+            sort_prob_logit = sorted(prob_logit[i])
+            curindex = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
+            count = 1
+            while curindex <= 3:
+                curindex = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
+                count += 1
+            cur_ind = curindex
+        '''
+        generated_words.append(ixtoword[cur_ind])
+    
+    return " ".join(generated_words)
+
 
 
 def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncating='pre', value=0.):
@@ -63,6 +87,9 @@ def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncati
 
 def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=False):
     for i in range(len(batch_X)):
+        # if batch_X[i] is string, should be split 
+        if not isinstance(batch_X[i], list):
+            batch_X[i] = batch_X[i].strip().split()
         batch_X[i] = [word_vector[w] if w in word_vector else np.zeros(dim_wordvec) for w in batch_X[i]]
         if noise:
             batch_X[i].insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
@@ -135,7 +162,7 @@ def get_pmi_kw(sentence, topK=1):
 
 def get_textRank_kw(sentence, topK=1):
     result = []
-    for x, w in jieba.analyse.textrank(sentence, topK = topK, withWeight = True):
+    for x, w in jieba.analyse.textrank(sentence, topK=topK, withWeight=True):
         result.append(x)
     return result
 

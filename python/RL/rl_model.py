@@ -13,8 +13,8 @@ class PolicyGradient_chatbot():
         self.n_decode_lstm_step = n_decode_lstm_step
         self.lr = lr
 
-        with tf.device("/cpu:0"):
-            self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
+        # with tf.device("/cpu:0"):
+        self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
         self.lstm1 = tf.contrib.rnn.BasicLSTMCell(dim_hidden, state_is_tuple=False)
         self.lstm2 = tf.contrib.rnn.BasicLSTMCell(dim_hidden, state_is_tuple=False)
@@ -27,11 +27,6 @@ class PolicyGradient_chatbot():
             self.embed_word_b = tf.Variable(bias_init_vector.astype(np.float32), name='embed_word_b')
         else:
             self.embed_word_b = tf.Variable(tf.zeros([n_words]), name='embed_word_b')
-
-        # keywords params
-        self.keywords_W = tf.Variable(tf.random_uniform([dim_hidden, n_words], -0.1, 0.1), name='keywords_W')
-        self.keywords_b = tf.Variable(tf.zeros([n_words]), name='keywords_b')
-
 
 
     def build_model(self):
@@ -50,10 +45,9 @@ class PolicyGradient_chatbot():
         state2 = tf.zeros([self.batch_size, self.lstm2.state_size])
         padding = tf.zeros([self.batch_size, self.dim_hidden])
 
-        # probs = []
-        # states = []
+        probs = []
+        states = []
         entropies = []
-        loss = 0.
         pg_loss = 0.  # policy gradient loss
 
         ##############################  Encoding Stage ##################################
@@ -63,30 +57,21 @@ class PolicyGradient_chatbot():
 
             with tf.variable_scope("LSTM1"):
                 output1, state1 = self.lstm1(wordvec_emb[:, i, :], state1)
-                # states.append(state1)
+                states.append(state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
 
 
-        ############################## Keywords Stage ###################################
-        tf.get_variable_scope().reuse_variables()
-        # TODO! output1 or output2?
-        keywords_info = tf.nn.xw_plus_b(output1, self.keywords_W, self.keywords_b) # [batch * n_words]
-        keywords_index = tf.argmax(keywords_info, 1)
-        current_keywords = tf.nn.embedding_lookup(self.Wemb, keywords_index)
-
-
         ############################# Decoding Stage ######################################
         for i in range(0, self.n_decode_lstm_step):
-            with tf.device("/cpu:0"):
-                current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
+            # with tf.device("/cpu:0"):
+            current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
 
             tf.get_variable_scope().reuse_variables()
 
             with tf.variable_scope("LSTM1"):
-                # here I replace "padding" with "current_keywords"
-                output1, state1 = self.lstm1(current_keywords, state1)
+                output1, state1 = self.lstm1(padding, state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)
@@ -97,34 +82,21 @@ class PolicyGradient_chatbot():
             onehot_labels = tf.sparse_to_dense(concated, tf.stack([self.batch_size, self.n_words]), 1.0, 0.0)
 
             logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
-            # probs.append(logit_words)
+            probs.append(logit_words)
 
             cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logit_words, labels=onehot_labels)
             cross_entropy = cross_entropy * caption_mask[:, i]
             entropies.append(cross_entropy)
             pg_cross_entropy = cross_entropy * reward[:, i]
 
-            # current_loss = tf.reduce_sum(cross_entropy) / self.batch_size
-            # loss = loss + current_loss
-
             pg_current_loss = tf.reduce_sum(pg_cross_entropy) / self.batch_size
-            pg_loss = pg_loss + pg_current_loss
+            pg_loss += pg_current_loss
+
 
         with tf.variable_scope(tf.get_variable_scope(), reuse=False):
-            # train_op = tf.train.RMSPropOptimizer(self.lr).minimize(loss)
-            # train_op = tf.train.GradientDescentOptimizer(self.lr).minimize(loss)
+            # train_op = tf.train.RMSPropOptimizer(self.lr).minimize(pg_loss)
+            # train_op = tf.train.GradientDescentOptimizer(self.lr).minimize(pg_loss)
             train_op = tf.train.AdamOptimizer(self.lr).minimize(pg_loss)
-            # pg_train_op = tf.train.AdamOptimizer(self.lr).minimize(pg_loss)
-
-        # train_ops = {
-        #     'normal': train_op, # normal training
-        #     'pg': pg_train_op   # policy gradient training
-        # }
-
-        # losses = {
-        #     'normal': loss, # normal loss
-        #     'pg': pg_loss   # policy gradient loss
-        # }
 
         input_tensors = {
             'word_vectors': word_vectors,
@@ -134,9 +106,9 @@ class PolicyGradient_chatbot():
         }
 
         feats = {
-            'entropies': entropies
-            # 'probs': probs,
-            # 'states': states
+            'entropies': entropies,
+            'probs': probs,
+            'states': states
         }
 
         return train_op, pg_loss, input_tensors, feats
@@ -170,13 +142,6 @@ class PolicyGradient_chatbot():
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
 
-        ############################## Keywords Stage ###################################
-        tf.get_variable_scope().reuse_variables()
-        # TODO! output1 or output2?
-        keywords_info = tf.nn.xw_plus_b(output1, self.keywords_W, self.keywords_b) # [batch * n_words]
-        keywords_index = tf.argmax(keywords_info, 1)
-        current_keywords = tf.nn.embedding_lookup(self.Wemb, keywords_index)
-
         
         ############################ Decoding Stage ###################################
         for i in range(0, self.n_decode_lstm_step):
@@ -184,19 +149,16 @@ class PolicyGradient_chatbot():
 
             if i == 0:
                 # <bos>
-                with tf.device('/cpu:0'):
-                    current_embed = tf.nn.embedding_lookup(self.Wemb, tf.ones([self.batch_size], dtype=tf.int64))
-
-            # print('step {} current_embed.shape {}'.format(i, current_embed.get_shape()))
+                # with tf.device('/cpu:0'):
+                current_embed = tf.nn.embedding_lookup(self.Wemb, tf.ones([self.batch_size], dtype=tf.int64))
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1(current_keywords, state1)
+                output1, state1 = self.lstm1(padding, state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)
 
             logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
-            # print('logit_words.shape', logit_words.get_shape())
             max_prob_index = tf.argmax(logit_words, 1)
             # print('max_prob_index.shape', max_prob_index.get_shape())
             # max_prob_index = tmp[0]
@@ -207,14 +169,13 @@ class PolicyGradient_chatbot():
             probs.append(logit_words)
             # print('len(probs)', len(probs))
 
-            with tf.device("/cpu:0"):
-                current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
+            # with tf.device("/cpu:0"):
+            current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
 
             embeds.append(current_embed)
 
         encode_feats = {
-            'encode_states': encode_states,
-            'keywords': current_keywords
+            'encode_states': encode_states
         }
 
         decode_feats = {

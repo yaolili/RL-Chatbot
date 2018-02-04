@@ -8,8 +8,9 @@ import sys
 import copy
 
 sys.path.append("python")
+from rl_model import PolicyGradient_chatbot
 from model import Seq2Seq_chatbot
-from utils import make_batch_X, make_batch_Y, get_pmi_kw, get_textRank_kw
+from utils import make_batch_X, make_batch_Y, get_pmi_kw, get_textRank_kw, index2sentence
 from data_reader import Data_Reader
 import data_parser
 import config
@@ -21,18 +22,19 @@ import tensorflow as tf
 import numpy as np
 import math
 
-
 ### Global Parameters ###
+training_data_path = config.training_data_path
+reversed_model_path = config.reversed_model_path
+reversed_model_name = config.reversed_model_name
+
+pretrain_emb = config.pretrain_emb
 checkpoint = config.CHECKPOINT
-training_data_path = config.rl_data_path
-training_type = config.training_type
 model_path = config.rl_model_path
 model_name = config.rl_model_name
-
 start_epoch = config.start_epoch
 start_batch = config.start_batch
-epochs = config.rl_epochs
-batch_size = config.batch_size
+
+word_count_threshold = config.WC_threshold
 
 ### Train Parameters ###
 learning_rate = config.learning_rate
@@ -41,54 +43,108 @@ dim_hidden = config.dim_hidden
 
 n_encode_lstm_step = config.n_encode_lstm_step
 n_decode_lstm_step = config.n_decode_lstm_step
+r_n_encode_lstm_step = config.r_n_encode_lstm_step
+r_n_decode_lstm_step = config.r_n_decode_lstm_step
 
-word_count_threshold = config.WC_threshold
+epochs = config.max_epochs
+batch_size = config.batch_size
 
-alpha = config.alpha
-max_turns = cofig.MAX_TURNS
+alpha1 = config.alpha1
+alpha2 = config.alpha2
+alpha3 = config.alpha3
+max_turns = config.MAX_TURNS
+
+# here should be unicode
+dull_set = [u"哦哦哦 好 的", u"嘿嘿", u"嘻嘻 嘻", u"么 么 哒", u"啊啊啊 啊啊啊 啊", u"那 你 很 棒棒 呦", u"哈哈哈哈 哈哈哈", u"厉害 了", u"啧啧 啧", u"是 滴", u"怎么 啦"]
+
+ones_reward = np.ones([batch_size, n_decode_lstm_step])
 
 
-def index2sentence(generated_word_index, prob_logit, ixtoword):
-    generated_words = []
-    for cur_ind in generated_word_index:
-        # pad 0, bos 1, eos 2, unk 3
-        if cur_ind == 2: break
+def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask):
+
+    dull_reward = []
+    # Each action vector should calculate the reward of each dull_sentence in dull set
+    for vector in action_feats:
+        action_batch_X = np.array([vector for _ in range(batch_size)])
+        d_feats = sess.run(feats,
+                     feed_dict={
+                        input_tensors['word_vectors']: action_batch_X,
+                        input_tensors['caption']: dull_matrix,
+                        input_tensors['caption_mask']: dull_mask,
+                        input_tensors['reward']: ones_reward
+                    })
+        d_entropies = np.array(d_feats['entropies']).reshape(batch_size, n_decode_lstm_step)
+        cur_loss = 0.0
+        for i in range(batch_size):
+            cur_len = len(dull_set[i].strip().split())
+            if cur_len == 0: break
+            cur_loss += tf.reduce_sum(d_entropies[i]) / cur_len
+
+        d_loss = -1. / len(dull_set) * cur_loss 
+        dull_reward.append(d_loss)
+
+    return dull_reward
+
+
+def semantic_coherence_rewards(forward_entropy, backward_entropy, forward_target, backward_target):
+    forward_entropy = np.array(forward_entropy).reshape(batch_size, n_decode_lstm_step)
+    backward_entropy = np.array(backward_entropy).reshape(batch_size, n_decode_lstm_step)
         
-        '''
-        # remove <unk> <pad> <bos> to second high prob. word
-        if cur_ind <= 3:
-            sort_prob_logit = sorted(prob_logit[i])
-            curindex = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
-            count = 1
-            while curindex <= 3:
-                curindex = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
-                count += 1
-            cur_ind = curindex
-        '''
-        generated_words.append(ixtoword[cur_ind])
-    
-    return generated_words
-
-
-# TODO
-def count_rewards(query, sess_reply, cur_depth, total_depth, cur_reward):
-    total_loss = np.zeros([batch_size, n_decode_lstm_step])
+    forward_reward = []
+    backward_reward = []
     for i in range(batch_size):
-        s1 = 1.0 - spatial.distance.cosine(query[i], keywords[i])
-        s2 = 1.0 - spatial.distance.cosine(reply[i], keywords[i])
-        total_loss[i, :] += alpha * s1 + (1 - alpha) * s2 + 1  # here puls 1 to exceed original reward 1
-    return total_loss
+        forward_len = len(forward_target[i].split())
+        backward_len = len(backward_target[i].split())
+        if forward_len > 0:
+            forward_reward.append(np.sum(forward_entropy[i]) / forward_len)
+        if backward_len > 0:
+            backward_reward.append(np.sum(backward_entropy[i]) / backward_len)
+
+    return forward_reward, backward_reward
+
+
+def info_flow_reward():
+    pass
+
+
+# TODO: info_flow_reward
+def total_reward(dull_reward, forward_reward, backward_reward):
+    total_reward = np.zeros([batch_size, n_decode_lstm_step])
+    for i in range(batch_size):
+        print(type(dull_reward[i]))
+        print(type(alpha1))
+        print(alpha1 * dull_reward[i])
+        print(type(alpha1 * dull_reward[i]))
+        total_reward[i, :] += alpha1 * dull_reward[i]
+        semantic_reward = map(lambda x, y: x + y, forward_reward[i], backward_reward[i])
+        total_reward[i, :] += map(lambda x: alpha3 * x, semantic_reward)
+    return total_reward
+
 
 
 def train():
+    # Cannot remove "GLOBAL" as the "dull_set" will be changed as global variable
+    global dull_set
+
     wordtoix, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
-    word_vector = KeyedVectors.load_word2vec_format('model/word_vector.bin', binary=True)
-    # ones_reward = np.ones([batch_size, n_decode_lstm_step])
+    word_vector = KeyedVectors.load_word2vec_format(pretrain_emb, binary=True)
+
+    # Prepare for ease of answering
+    if len(dull_set) > batch_size:
+        dull_set = dull_set[:batch_size]
+    else:
+        for _ in range(len(dull_set), batch_size):
+            dull_set.append('')
+    dull_matrix, dull_mask = make_batch_Y(
+                                batch_Y=dull_set, 
+                                wordtoix=wordtoix, 
+                                n_decode_lstm_step=n_decode_lstm_step)
 
     g1 = tf.Graph()
+    g2 = tf.Graph()
     default_graph = tf.get_default_graph() 
     with g1.as_default():
-        model = Seq2Seq_chatbot(
+        model = PolicyGradient_chatbot(
                 dim_wordvec=dim_wordvec,
                 n_words=len(wordtoix),
                 dim_hidden=dim_hidden,
@@ -97,11 +153,9 @@ def train():
                 n_decode_lstm_step=n_decode_lstm_step,
                 bias_init_vector=bias_init_vector,
                 lr=learning_rate)
-        train_op, loss, input_tensors, inter_value = model.build_model()
-        word_vectors, generated_words, probs, embs = model.build_generator()
-        
-        # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
-        # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))   
+        train_op, loss, input_tensors, feats = model.build_model()
+        word_vectors, generated_words, encode_feats, decode_feats = model.build_generator()
+
         sess = tf.InteractiveSession()
         saver = tf.train.Saver(max_to_keep=100)
         if checkpoint:
@@ -112,76 +166,145 @@ def train():
             print("Restart training...")
             tf.global_variables_initializer().run()
 
+    with g2.as_default():
+        reversed_model = Seq2Seq_chatbot(
+            dim_wordvec=dim_wordvec,
+            n_words=len(wordtoix),
+            dim_hidden=dim_hidden,
+            batch_size=batch_size,
+            n_encode_lstm_step=r_n_encode_lstm_step,
+            n_decode_lstm_step=r_n_decode_lstm_step,
+            bias_init_vector=bias_init_vector,
+            lr=learning_rate)
+        _, _, r_word_vectors, caption, caption_mask, reverse_inter = reversed_model.build_model()
+        sess2 = tf.InteractiveSession()
+        saver2 = tf.train.Saver()
+        saver2.restore(sess2, os.path.join(reversed_model_path, reversed_model_name))
+        print("Reversed model {} restored.".format(reversed_model_name))
          
     # TODO: figure out load_list
     dr = Data_Reader(training_data_path, cur_train_index=config.cur_train_index, load_list=config.load_list)
 
     # simulation
-    for turn in range(2, max_turns):
-        for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch, epochs):
             n_batch = dr.get_batch_num(batch_size)
             sb = start_batch if epoch == start_epoch else 0
             for batch in range(sb, n_batch):
                 start_time = time.time()
 
                 # only batch_x is used as the seed for agent A to start the conversation
-                batch_X, _ = dr.generate_training_batch(batch_size)
-
+                batch_X, _, former, _ = dr.generate_training_batch_with_former(batch_size)
                 current_feats = make_batch_X(
-                                batch_X=copy.deepcopy(batch_X), 
-                                n_encode_lstm_step=n_encode_lstm_step, 
-                                dim_wordvec=dim_wordvec,
-                                word_vector=word_vector)
+                                    batch_X=copy.deepcopy(batch_X), 
+                                    n_encode_lstm_step=n_encode_lstm_step, 
+                                    dim_wordvec=dim_wordvec,
+                                    word_vector=word_vector)
 
-                # rl action: generate batch_size sents
-                action_word_indexs, action_probs, action_embs = sess.run([generated_words, probs, embs],
-                    feed_dict={
-                       word_vectors: current_feats
-                    })
-                action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)
-                action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
+                current_caption_matrix = None
+                current_caption_masks = None
 
-                    # Here I use the last encoder hidden state as the representation of query
-                    query = np.array(enc_feats['encode_states'][-1]).reshape(batch_size, dim_hidden)
-                    keywords = np.array(enc_feats['keywords']).reshape(batch_size, dim_hidden)
-                    
-                    # To get the representation of reply, encode the reply sequence
-                    generated_actions_list = []
+                def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, flag=False):
+                    if cur_turn >= max_turns:
+                        return cur_reward
+
+                    # rl action: generate batch_size sents, use build_generator()
+                    action_word_indexs, action_decode_feats = sess.run([generated_words, decode_feats],
+                        feed_dict={
+                           word_vectors: current_feats
+                        })
+                    action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
+
+                    action_probs = action_decode_feats['probs']
+                    action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
+
+                    # actions : a list of sentences ['', '',..., '']
+                    actions = []
                     for i in range(len(action_word_indexs)):
                         action = index2sentence(
                                     generated_word_index=action_word_indexs[i], 
                                     prob_logit=action_probs[i],
                                     ixtoword=ixtoword)
-                        generated_actions_list.append(action)
+                        actions.append(action)
 
+                    ################ ease of answering ################
                     action_feats = make_batch_X(
-                                    batch_X=copy.deepcopy(generated_actions_list), 
+                                    batch_X=copy.deepcopy(actions), 
                                     n_encode_lstm_step=n_encode_lstm_step, 
                                     dim_wordvec=dim_wordvec,
                                     word_vector=word_vector)
 
-                    enc_feats = sess.run(encode_feats,
-                                            feed_dict={
-                                               word_vectors: action_feats
-                                            })
-                    reply = np.array(enc_feats['encode_states'][-1]).reshape(batch_size, dim_hidden)
+                    dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
 
-                    # get reward given query, keyword, reply
-                    rewards = count_rewards(query, keywords, reply)
-        
-                    feed_dict = {
+
+                    ################ semantic coherence ################
+                    action_caption_matrix, action_caption_masks = make_batch_Y(
+                                                                    batch_Y=copy.deepcopy(actions),
+                                                                    wordtoix=wordtoix, 
+                                                                    n_decode_lstm_step=n_decode_lstm_step)
+
+                    # PLS make sure that only one assignment
+                    if flag:
+                        current_caption_matrix = action_caption_matrix
+                        current_caption_masks = action_caption_masks
+
+                    forward_inter = sess.run(feats,
+                                     feed_dict={
+                                        input_tensors['word_vectors']: current_feats,
+                                        input_tensors['caption']: action_caption_matrix,
+                                        input_tensors['caption_mask']: action_caption_masks,
+                                        input_tensors['reward']: ones_reward
+                                    })
+                    forward_entropies = forward_inter['entropies']
+                    former_caption_matrix, former_caption_masks = make_batch_Y(
+                                                                    batch_Y=copy.deepcopy(former), 
+                                                                    wordtoix=wordtoix, 
+                                                                    n_decode_lstm_step=n_decode_lstm_step)
+                    action_feats = make_batch_X(
+                                    batch_X=copy.deepcopy(actions), 
+                                    n_encode_lstm_step=r_n_encode_lstm_step, 
+                                    dim_wordvec=dim_wordvec,
+                                    word_vector=word_vector)
+                    backward_inter = sess2.run(reverse_inter,
+                                     feed_dict={
+                                        r_word_vectors: action_feats,
+                                        caption: former_caption_matrix,
+                                        caption_mask: former_caption_masks
+                                    })
+                    backward_entropies = backward_inter['entropies']
+
+                    forward_reward, backward_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
+
+
+                    ################ information flow ################
+                    # TODO
+                    pass
+
+                    reward = total_reward(dull_reward, forward_reward, backward_reward)
+
+                    # next_batch_X = former + action
+                    former_feats = make_batch_X(
+                                    batch_X=copy.deepcopy(former), 
+                                    n_encode_lstm_step=n_encode_lstm_step, 
+                                    dim_wordvec=dim_wordvec,
+                                    word_vector=word_vector)
+
+
+                    next_feats = tf.concat(1, [former_feats, action_feats])
+
+                    return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions)
+
+
+
+                expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, flag=True)
+                
+                assert current_caption_masks != None, "current_caption_matrix is None!"
+                assert current_caption_matrix != None, "current_caption_masks is None!"
+               
+                feed_dict = {
                         input_tensors['word_vectors']: current_feats,
                         input_tensors['caption']: current_caption_matrix,
                         input_tensors['caption_mask']: current_caption_masks,
-                        input_tensors['reward']: rewards
-                    }
-                    
-                if training_type == 'normal':
-                    feed_dict = {
-                        input_tensors['word_vectors']: current_feats,
-                        input_tensors['caption']: current_caption_matrix,
-                        input_tensors['caption_mask']: current_caption_masks,
-                        input_tensors['reward']: ones_reward
+                        input_tensors['reward']: expected_reward
                     }
 
                 if batch % 10 == 0:
