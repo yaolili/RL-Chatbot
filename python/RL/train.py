@@ -80,7 +80,7 @@ def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix,
             if cur_len == 0: break
             cur_loss += tf.reduce_sum(d_entropies[i]) / cur_len
 
-        d_loss = -1. / len(dull_set) * cur_loss 
+        d_loss = -1. / len(dull_set) * cur_loss
         dull_reward.append(d_loss)
 
     return dull_reward
@@ -92,33 +92,31 @@ def semantic_coherence_rewards(forward_entropy, backward_entropy, forward_target
         
     forward_reward = []
     backward_reward = []
+    semantic_reward = []
     for i in range(batch_size):
         forward_len = len(forward_target[i].split())
         backward_len = len(backward_target[i].split())
-        if forward_len > 0:
-            forward_reward.append(np.sum(forward_entropy[i]) / forward_len)
-        if backward_len > 0:
-            backward_reward.append(np.sum(backward_entropy[i]) / backward_len)
+        assert forward_len > 0 and backward_len > 0, "Empty forward_target or backward_target"
+        forward_reward.append(np.sum(forward_entropy[i]) / forward_len)
+        backward_reward.append(np.sum(backward_entropy[i]) / backward_len)
+        semantic_reward.append(forward_reward[i] + backward_reward[i])
+    return semantic_reward
 
-    return forward_reward, backward_reward
 
-
+# TODO: info_flow_reward
 def info_flow_reward():
     pass
 
 
-# TODO: info_flow_reward
-def total_reward(dull_reward, forward_reward, backward_reward):
-    total_reward = np.zeros([batch_size, n_decode_lstm_step])
-    for i in range(batch_size):
-        print(type(dull_reward[i]))
-        print(type(alpha1))
-        print(alpha1 * dull_reward[i])
-        print(type(alpha1 * dull_reward[i]))
-        total_reward[i, :] += alpha1 * dull_reward[i]
-        semantic_reward = map(lambda x, y: x + y, forward_reward[i], backward_reward[i])
-        total_reward[i, :] += map(lambda x: alpha3 * x, semantic_reward)
-    return total_reward
+def total_reward(dull_reward, semantic_reward):
+    dull_reward = tf.multiply(alpha1, tf.transpose(dull_reward))
+    semantic_reward = tf.multiply(alpha3, tf.transpose(semantic_reward))
+    print(tf.shape(dull_reward))
+    print(tf.shape(semantic_reward))
+    all_reward = tf.add(dull_reward, semantic_reward)
+    all_reward = tf.tile(all_reward,[n_decode_lstm_step])
+    print(tf.shape(all_reward))
+    return all_reward
 
 
 
@@ -224,6 +222,7 @@ def train():
                                     generated_word_index=action_word_indexs[i], 
                                     prob_logit=action_probs[i],
                                     ixtoword=ixtoword)
+                        assert len(action.strip().split()) > 0, "Empty action!"
                         actions.append(action)
 
                     ################ ease of answering ################
@@ -272,14 +271,14 @@ def train():
                                     })
                     backward_entropies = backward_inter['entropies']
 
-                    forward_reward, backward_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
+                    semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
 
 
                     ################ information flow ################
                     # TODO
                     pass
 
-                    reward = total_reward(dull_reward, forward_reward, backward_reward)
+                    reward = total_reward(dull_reward, semantic_reward)
 
                     # next_batch_X = former + action
                     former_feats = make_batch_X(
@@ -288,7 +287,10 @@ def train():
                                     dim_wordvec=dim_wordvec,
                                     word_vector=word_vector)
 
-
+                    print("*****")
+                    print(tf.shape(former_feats))
+                    print(tf.shape(action_feats))
+                    print("*****")
                     next_feats = tf.concat(1, [former_feats, action_feats])
 
                     return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions)

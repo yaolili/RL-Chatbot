@@ -57,3 +57,15 @@ class Data_Reader:
         batch_X = [self.training_data[i][0] for i in batch_index]   # batch_size of conv_a
 
         return batch_X
+
+if __name__ == "__main__":
+    dr = Data_Reader('data/weibo_data/train_lenmax22_formersents2_with_former_kw.pkl')
+    batch_X, _, former, _ = dr.generate_training_batch_with_former(50)
+    for i in range(50):
+        if len(former[i].split()) == 0:
+            print(batch_X)
+            print(i)
+            exit()
+        else:
+            print("***")
+
