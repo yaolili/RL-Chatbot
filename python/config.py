@@ -36,7 +36,7 @@ start_epoch = 0
 start_batch = 0
 max_epochs = 15
 rl_epochs = 2  # for each depth, iterate N epochs
-batch_size = 50
+batch_size = 1
 
 # training parameters
 learning_rate = 0.0001

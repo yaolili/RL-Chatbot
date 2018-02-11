@@ -111,11 +111,11 @@ def info_flow_reward():
 def total_reward(dull_reward, semantic_reward):
     dull_reward = tf.multiply(alpha1, tf.transpose(dull_reward))
     semantic_reward = tf.multiply(alpha3, tf.transpose(semantic_reward))
-    print(tf.shape(dull_reward))
-    print(tf.shape(semantic_reward))
+    print(dull_reward.get_shape())
+    print(semantic_reward.get_shape())
     all_reward = tf.add(dull_reward, semantic_reward)
     all_reward = tf.tile(all_reward,[n_decode_lstm_step])
-    print(tf.shape(all_reward))
+    print(all_reward.get_shape())
     return all_reward
 
 
