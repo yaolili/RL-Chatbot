@@ -19,7 +19,7 @@ from utils import make_batch_X, make_batch_Y
 
 
 ### Global Parameters ###
-training_data_path = config.reverseed_data_path 
+training_data_path = config.training_data_path
 pretrain_emb = config.pretrain_emb
 checkpoint = config.CHECKPOINT
 model_path = config.reversed_model_path
@@ -76,7 +76,8 @@ def train():
         for batch in range(n_batch):
             start_time = time.time()
 
-            batch_X, batch_Y = dr.generate_training_batch(batch_size)
+            # reverse X and Y
+            batch_Y, batch_X = dr.generate_training_batch(batch_size)
             current_feats = make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector)
             current_caption_matrix, current_caption_masks = make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step)
 
