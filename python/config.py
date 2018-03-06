@@ -21,10 +21,10 @@ pmi_dict_path = 'data/weibo_data/pmi_dict.pkl'
 CHECKPOINT = False  # reload 
 training_type = 'normal' # 'normal' for seq2seq training, 'pg' for policy gradient
 train_model_path = 'model/Seq2Seq/'
-train_model_name = 'model-0'
+train_model_name = 'model-14'
 
 reversed_model_path = 'model/Reversed/' # only uesed for Li's baseline
-reversed_model_name = 'model-0'
+reversed_model_name = 'model-14'
 
 kw_model_path = 'model/Kw/'
 kw_model_name = 'model-0'

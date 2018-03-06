@@ -17,22 +17,22 @@ with open(config.pmi_dict_path, "rb") as fin:
 
 def index2sentence(generated_word_index, prob_logit, ixtoword):
     generated_words = []
-    for cur_ind in generated_word_index:
+    for i in range(len(generated_word_index)):
         # pad 0, bos 1, eos 2, unk 3
-        if cur_ind == 2: break
-        
-        '''
-        # remove <unk> <pad> <bos> to second high prob. word
-        if cur_ind <= 3:
+        cur_ind = generated_word_index[i]
+        if cur_ind == 3 or cur_ind <= 1:
             sort_prob_logit = sorted(prob_logit[i])
-            curindex = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
+            new_ind = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
             count = 1
-            while curindex <= 3:
-                curindex = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
+            while new_ind <= 3:
+                new_ind = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
                 count += 1
-            cur_ind = curindex
-        '''
-        generated_words.append(ixtoword[cur_ind])
+            cur_ind = new_ind
+        generated_words.append(ixtoword[cur_ind].decode('utf-8'))
+
+    # cut off the first <eos>
+    punctuation = np.argmax(np.array(generated_words) == '<eos>') + 1
+    generated_words = generated_words[:punctuation]
     
     return " ".join(generated_words)
 
@@ -100,7 +100,7 @@ def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=Fa
             for _ in range(len(batch_X[i]), n_encode_lstm_step):
                 batch_X[i].append(np.zeros(dim_wordvec))
 
-    current_feats = np.array(batch_X)
+    current_feats = np.asarray(batch_X, np.float32)
     return current_feats # current_feats is word embedding sequence
 
 def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):

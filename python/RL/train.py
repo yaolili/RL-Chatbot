@@ -49,9 +49,9 @@ r_n_decode_lstm_step = config.r_n_decode_lstm_step
 epochs = config.max_epochs
 batch_size = config.batch_size
 
-alpha1 = config.alpha1
-alpha2 = config.alpha2
-alpha3 = config.alpha3
+alpha1 = float(config.alpha1)
+alpha2 = float(config.alpha2)
+alpha3 = float(config.alpha3)
 max_turns = config.MAX_TURNS
 
 # here should be unicode
@@ -109,14 +109,15 @@ def info_flow_reward():
 
 
 def total_reward(dull_reward, semantic_reward):
-    dull_reward = tf.multiply(alpha1, tf.transpose(dull_reward))
-    semantic_reward = tf.multiply(alpha3, tf.transpose(semantic_reward))
-    print(dull_reward.get_shape())
-    print(semantic_reward.get_shape())
-    all_reward = tf.add(dull_reward, semantic_reward)
-    all_reward = tf.tile(all_reward,[n_decode_lstm_step])
-    print(all_reward.get_shape())
-    return all_reward
+    print(alpha1)
+    print(type(alpha1))
+    print("********")
+    print(dull_reward)
+    print(type(dull_reward))
+    dull_reward = alpha1 * dull_reward 
+    semantic_reward = alpha3 * semantic_reward
+    all_reward = dull_reward + semantic_reward
+    return 1 - all_reward
 
 
 
@@ -185,142 +186,149 @@ def train():
 
     # simulation
     for epoch in range(start_epoch, epochs):
-            n_batch = dr.get_batch_num(batch_size)
-            sb = start_batch if epoch == start_epoch else 0
-            for batch in range(sb, n_batch):
-                start_time = time.time()
+        n_batch = dr.get_batch_num(batch_size)
+        sb = start_batch if epoch == start_epoch else 0
+        for batch in range(sb, n_batch):
+            start_time = time.time()
 
-                # only batch_x is used as the seed for agent A to start the conversation
-                batch_X, _, former, _ = dr.generate_training_batch_with_former(batch_size)
-                current_feats = make_batch_X(
-                                    batch_X=copy.deepcopy(batch_X), 
-                                    n_encode_lstm_step=n_encode_lstm_step, 
-                                    dim_wordvec=dim_wordvec,
-                                    word_vector=word_vector)
+            # only batch_x is used as the seed for agent A to start the conversation
+            batch_X, _, former, _ = dr.generate_training_batch_with_former(batch_size)
+            current_feats = make_batch_X(
+                                batch_X=copy.deepcopy(batch_X), 
+                                n_encode_lstm_step=n_encode_lstm_step, 
+                                dim_wordvec=dim_wordvec,
+                                word_vector=word_vector)
 
-                current_caption_matrix = None
-                current_caption_masks = None
+            current_caption_matrix = None
+            current_caption_masks = None
 
-                def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, flag=False):
-                    if cur_turn >= max_turns:
-                        return cur_reward
+            def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, flag=False):
+                if cur_turn >= max_turns:
+                    return cur_reward
 
-                    # rl action: generate batch_size sents, use build_generator()
-                    action_word_indexs, action_decode_feats = sess.run([generated_words, decode_feats],
-                        feed_dict={
-                           word_vectors: current_feats
-                        })
-                    action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
+                # rl action: generate batch_size sents, use build_generator()
+                action_word_indexs, action_decode_feats = sess.run([generated_words, decode_feats],
+                    feed_dict={
+                       word_vectors: current_feats
+                    })
+                action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
 
-                    action_probs = action_decode_feats['probs']
-                    action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
+                action_probs = action_decode_feats['probs']
+                action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
 
-                    # actions : a list of sentences ['', '',..., '']
-                    actions = []
-                    for i in range(len(action_word_indexs)):
-                        action = index2sentence(
-                                    generated_word_index=action_word_indexs[i], 
-                                    prob_logit=action_probs[i],
-                                    ixtoword=ixtoword)
-                        assert len(action.strip().split()) > 0, "Empty action!"
-                        actions.append(action)
+                # actions : a list of sentences ['', '',..., '']
+                actions = []
+                for i in range(len(action_word_indexs)):
+                    print(action_word_indexs[i])
+                    action = index2sentence(
+                                generated_word_index=action_word_indexs[i], 
+                                prob_logit=action_probs[i],
+                                ixtoword=ixtoword)
+                    assert len(action.strip().split()) > 0, "Empty action!"
+                    actions.append(action)
 
-                    ################ ease of answering ################
-                    action_feats = make_batch_X(
-                                    batch_X=copy.deepcopy(actions), 
-                                    n_encode_lstm_step=n_encode_lstm_step, 
-                                    dim_wordvec=dim_wordvec,
-                                    word_vector=word_vector)
+                ################ ease of answering ################
+                action_feats = make_batch_X(
+                                batch_X=copy.deepcopy(actions), 
+                                n_encode_lstm_step=n_encode_lstm_step, 
+                                dim_wordvec=dim_wordvec,
+                                word_vector=word_vector,
+                                noise=True)
 
-                    dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
-
-
-                    ################ semantic coherence ################
-                    action_caption_matrix, action_caption_masks = make_batch_Y(
-                                                                    batch_Y=copy.deepcopy(actions),
-                                                                    wordtoix=wordtoix, 
-                                                                    n_decode_lstm_step=n_decode_lstm_step)
-
-                    # PLS make sure that only one assignment
-                    if flag:
-                        current_caption_matrix = action_caption_matrix
-                        current_caption_masks = action_caption_masks
-
-                    forward_inter = sess.run(feats,
-                                     feed_dict={
-                                        input_tensors['word_vectors']: current_feats,
-                                        input_tensors['caption']: action_caption_matrix,
-                                        input_tensors['caption_mask']: action_caption_masks,
-                                        input_tensors['reward']: ones_reward
-                                    })
-                    forward_entropies = forward_inter['entropies']
-                    former_caption_matrix, former_caption_masks = make_batch_Y(
-                                                                    batch_Y=copy.deepcopy(former), 
-                                                                    wordtoix=wordtoix, 
-                                                                    n_decode_lstm_step=n_decode_lstm_step)
-                    action_feats = make_batch_X(
-                                    batch_X=copy.deepcopy(actions), 
-                                    n_encode_lstm_step=r_n_encode_lstm_step, 
-                                    dim_wordvec=dim_wordvec,
-                                    word_vector=word_vector)
-                    backward_inter = sess2.run(reverse_inter,
-                                     feed_dict={
-                                        r_word_vectors: action_feats,
-                                        caption: former_caption_matrix,
-                                        caption_mask: former_caption_masks
-                                    })
-                    backward_entropies = backward_inter['entropies']
-
-                    semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
+                dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
 
 
-                    ################ information flow ################
-                    # TODO
-                    pass
+                ################ semantic coherence ################
+                action_caption_matrix, action_caption_masks = make_batch_Y(
+                                                                batch_Y=copy.deepcopy(actions),
+                                                                wordtoix=wordtoix, 
+                                                                n_decode_lstm_step=n_decode_lstm_step)
 
-                    reward = total_reward(dull_reward, semantic_reward)
+                # PLS make sure that only one assignment
+                if flag:
+                    print("********** assignment here **********")
+                    current_caption_matrix = action_caption_matrix
+                    current_caption_masks = action_caption_masks
 
-                    # next_batch_X = former + action
-                    former_feats = make_batch_X(
-                                    batch_X=copy.deepcopy(former), 
-                                    n_encode_lstm_step=n_encode_lstm_step, 
-                                    dim_wordvec=dim_wordvec,
-                                    word_vector=word_vector)
+                forward_inter = sess.run(feats,
+                                 feed_dict={
+                                    input_tensors['word_vectors']: current_feats,
+                                    input_tensors['caption']: action_caption_matrix,
+                                    input_tensors['caption_mask']: action_caption_masks,
+                                    input_tensors['reward']: ones_reward
+                                })
+                forward_entropies = forward_inter['entropies']
+                former_caption_matrix, former_caption_masks = make_batch_Y(
+                                                                batch_Y=copy.deepcopy(former), 
+                                                                wordtoix=wordtoix, 
+                                                                n_decode_lstm_step=n_decode_lstm_step)
+                r_action_feats = make_batch_X(
+                                batch_X=copy.deepcopy(actions), 
+                                n_encode_lstm_step=r_n_encode_lstm_step, 
+                                dim_wordvec=dim_wordvec,
+                                word_vector=word_vector)
+                backward_inter = sess2.run(reverse_inter,
+                                 feed_dict={
+                                    r_word_vectors: r_action_feats,
+                                    caption: former_caption_matrix,
+                                    caption_mask: former_caption_masks
+                                })
+                backward_entropies = backward_inter['entropies']
 
-                    print("*****")
-                    print(tf.shape(former_feats))
-                    print(tf.shape(action_feats))
-                    print("*****")
-                    next_feats = tf.concat(1, [former_feats, action_feats])
-
-                    return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions)
+                semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
 
 
+                ################ information flow ################
+                # TODO
+                pass
 
-                expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, flag=True)
-                
-                assert current_caption_masks != None, "current_caption_matrix is None!"
-                assert current_caption_matrix != None, "current_caption_masks is None!"
-               
-                feed_dict = {
-                        input_tensors['word_vectors']: current_feats,
-                        input_tensors['caption']: current_caption_matrix,
-                        input_tensors['caption_mask']: current_caption_masks,
-                        input_tensors['reward']: expected_reward
-                    }
+                reward = total_reward(dull_reward, semantic_reward)
 
-                if batch % 10 == 0:
-                    _, loss_val = sess.run([train_op, loss], feed_dict = feed_dict)
-                    print("Epoch: {}, batch: {}, loss: {}, Elapsed time: {}".format(epoch, batch, loss_val, time.time() - start_time))
-                else:
-                    _ = sess.run(train_op, feed_dict = feed_dict)
+                # next_batch_X = former + actions
+                print("before concat, actions: ", actions)
+                print("before concat, former: ", former)
+                print("****")
 
-                if batch % 1000 == 0 and batch != 0:
-                    print("Epoch {} batch {} is done. Saving the model ...".format(epoch, batch))
-                    saver.save(sess, os.path.join(model_path, 'model-{}-{}'.format(epoch, batch)))
+                next_batch_X = []
+                for i in range(batch_size):
+                    next_batch_X.append(former[i] + actions[i])
 
-            print("Epoch ", epoch, " is done. Saving the model ...")
-            saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
+
+                next_feats = make_batch_X(
+                                batch_X=copy.deepcopy(next_batch_X), 
+                                n_encode_lstm_step=n_encode_lstm_step, 
+                                dim_wordvec=dim_wordvec,
+                                word_vector=word_vector)
+
+
+                return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions)
+
+
+
+            expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, flag=True)
+            
+            assert current_caption_masks != None, "current_caption_masks is None!"
+            assert current_caption_matrix != None, "current_caption_matrix is None!"
+           
+            feed_dict = {
+                    input_tensors['word_vectors']: current_feats,
+                    input_tensors['caption']: current_caption_matrix,
+                    input_tensors['caption_mask']: current_caption_masks,
+                    input_tensors['reward']: expected_reward
+                }
+
+            if batch % 10 == 0:
+                _, loss_val = sess.run([train_op, loss], feed_dict = feed_dict)
+                print("Epoch: {}, batch: {}, loss: {}, Elapsed time: {}".format(epoch, batch, loss_val, time.time() - start_time))
+            else:
+                _ = sess.run(train_op, feed_dict = feed_dict)
+
+            if batch % 1000 == 0 and batch != 0:
+                print("Epoch {} batch {} is done. Saving the model ...".format(epoch, batch))
+                saver.save(sess, os.path.join(model_path, 'model-{}-{}'.format(epoch, batch)))
+
+        print("Epoch ", epoch, " is done. Saving the model ...")
+        saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
 
 if __name__ == "__main__":
     train()
