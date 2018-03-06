@@ -61,7 +61,6 @@ ones_reward = np.ones([batch_size, n_decode_lstm_step])
 
 
 def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask):
-
     dull_reward = []
     # Each action vector should calculate the reward of each dull_sentence in dull set
     for vector in action_feats:
@@ -78,7 +77,7 @@ def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix,
         for i in range(batch_size):
             cur_len = len(dull_set[i].strip().split())
             if cur_len == 0: break
-            cur_loss += tf.reduce_sum(d_entropies[i]) / cur_len
+            cur_loss += np.sum(d_entropies[i]) / cur_len
 
         d_loss = -1. / len(dull_set) * cur_loss
         dull_reward.append(d_loss)
@@ -109,15 +108,12 @@ def info_flow_reward():
 
 
 def total_reward(dull_reward, semantic_reward):
-    print(alpha1)
-    print(type(alpha1))
-    print("********")
-    print(dull_reward)
-    print(type(dull_reward))
-    dull_reward = alpha1 * dull_reward 
-    semantic_reward = alpha3 * semantic_reward
-    all_reward = dull_reward + semantic_reward
-    return 1 - all_reward
+    dull_reward = alpha1 * np.array(dull_reward)
+    semantic_reward = alpha3 * np.array(semantic_reward)
+    all_reward = - (dull_reward + semantic_reward) 
+    all_reward = all_reward.reshape(all_reward.shape+(1,))
+    all_reward = np.tile(all_reward, n_decode_lstm_step)
+    return all_reward
 
 
 
@@ -202,9 +198,10 @@ def train():
             current_caption_matrix = None
             current_caption_masks = None
 
-            def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, flag=False):
+            def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, current_caption_matrix, current_caption_masks, flag=False):
                 if cur_turn >= max_turns:
-                    return cur_reward
+                    return current_caption_matrix, current_caption_masks, cur_reward
+                    
 
                 # rl action: generate batch_size sents, use build_generator()
                 action_word_indexs, action_decode_feats = sess.run([generated_words, decode_feats],
@@ -219,6 +216,7 @@ def train():
                 # actions : a list of sentences ['', '',..., '']
                 actions = []
                 for i in range(len(action_word_indexs)):
+                    # double check here!
                     print(action_word_indexs[i])
                     action = index2sentence(
                                 generated_word_index=action_word_indexs[i], 
@@ -244,9 +242,8 @@ def train():
                                                                 wordtoix=wordtoix, 
                                                                 n_decode_lstm_step=n_decode_lstm_step)
 
-                # PLS make sure that only one assignment
                 if flag:
-                    print("********** assignment here **********")
+                    assert cur_turn == 0, "Only once assignment for current_caption_matrix & action_caption_masks!"
                     current_caption_matrix = action_caption_matrix
                     current_caption_masks = action_caption_masks
 
@@ -285,10 +282,6 @@ def train():
                 reward = total_reward(dull_reward, semantic_reward)
 
                 # next_batch_X = former + actions
-                print("before concat, actions: ", actions)
-                print("before concat, former: ", former)
-                print("****")
-
                 next_batch_X = []
                 for i in range(batch_size):
                     next_batch_X.append(former[i] + actions[i])
@@ -301,15 +294,15 @@ def train():
                                 word_vector=word_vector)
 
 
-                return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions)
+                return _expected_reward(cur_turn + 1, max_turns, cur_reward + reward, next_feats, actions, current_caption_matrix, current_caption_masks)
 
 
 
-            expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, flag=True)
+            current_caption_matrix, current_caption_masks, expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, current_caption_matrix, current_caption_masks, flag=True)
             
-            assert current_caption_masks != None, "current_caption_masks is None!"
-            assert current_caption_matrix != None, "current_caption_matrix is None!"
-           
+            assert np.all(current_caption_masks != None), "current_caption_masks is None!"
+            assert np.all(current_caption_matrix != None), "current_caption_matrix is None!"
+
             feed_dict = {
                     input_tensors['word_vectors']: current_feats,
                     input_tensors['caption']: current_caption_matrix,
