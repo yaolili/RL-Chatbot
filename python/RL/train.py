@@ -108,11 +108,15 @@ def info_flow_reward():
 
 
 def total_reward(dull_reward, semantic_reward):
+    print("dull_reward: ", dull_reward)
+    print("semantic_reward: ", semantic_reward)
+
     dull_reward = alpha1 * np.array(dull_reward)
     semantic_reward = alpha3 * np.array(semantic_reward)
     all_reward = - (dull_reward + semantic_reward) 
     all_reward = all_reward.reshape(all_reward.shape+(1,))
     all_reward = np.tile(all_reward, n_decode_lstm_step)
+    print("all_reward: ", all_reward)
     return all_reward
 
 
@@ -299,6 +303,9 @@ def train():
 
 
             current_caption_matrix, current_caption_masks, expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, current_caption_matrix, current_caption_masks, flag=True)
+
+            expected_reward = 1.0 / max_turns * expected_reward
+            print("expected_reward: ", expected_reward)
             
             assert np.all(current_caption_masks != None), "current_caption_masks is None!"
             assert np.all(current_caption_matrix != None), "current_caption_matrix is None!"
