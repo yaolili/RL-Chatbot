@@ -2,6 +2,10 @@
 
 from __future__ import print_function
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+import cPickle as pkl
+
 from gensim.models import KeyedVectors
 import data_parser
 import config
@@ -11,46 +15,42 @@ import tensorflow as tf
 import numpy as np
 
 import re
-import os
 import sys
 import time
+
+import utils
+from data_reader import Data_Reader
+from utils import make_batch_X, make_batch_Y, index2sentence  # x
+
+sess = tf.InteractiveSession()
 
 #=====================================================
 # Global Parameters
 #=====================================================
-default_model_path = './model/Seq2Seq/model-77'
-testing_data_path = 'sample_input.txt' if len(sys.argv) <= 2 else sys.argv[2]
-output_path = 'sample_output_S2S.txt' if len(sys.argv) <= 3 else sys.argv[3]
+default_model_path = config.test_model_path
+testing_data_path = config.test_data_path if len(sys.argv) <= 2 else sys.argv[2]
+output_path = config.test_out_path if len(sys.argv) <= 3 else sys.argv[3]
 
 word_count_threshold = config.WC_threshold
 
 #=====================================================
 # Train Parameters
 #=====================================================
-dim_wordvec = 300
-dim_hidden = 1000
+dim_wordvec = config.dim_wordvec
+dim_hidden = config.dim_hidden
 
-n_encode_lstm_step = 22 + 1 # one random normal as the first timestep
-n_decode_lstm_step = 22
+n_encode_lstm_step = config.n_encode_lstm_step
+n_decode_lstm_step = config.n_decode_lstm_step
 
-batch_size = 1
-
-""" Extract only the vocabulary part of the data """
-def refine(data):
-    words = re.findall("[a-zA-Z'-]+", data)
-    words = ["".join(word.split("'")) for word in words]
-    # words = ["".join(word.split("-")) for word in words]
-    data = ' '.join(words)
-    return data
+batch_size = config.batch_size
 
 def test(model_path=default_model_path):
-    testing_data = open(testing_data_path, 'r').read().split('\n')
 
-    word_vector = KeyedVectors.load_word2vec_format('model/word_vector.bin', binary=True)
+    word_vector = KeyedVectors.load_word2vec_format(config.pretrain_emb, binary=True)
 
-    _, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
+    wordtoix, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
 
-    model = Seq2Seq_chatbot(
+    model = config.test_model_proto(
             dim_wordvec=dim_wordvec,
             n_words=len(ixtoword),
             dim_hidden=dim_hidden,
@@ -61,7 +61,7 @@ def test(model_path=default_model_path):
 
     word_vectors, caption_tf, probs, _ = model.build_generator()
 
-    sess = tf.InteractiveSession()
+    global sess
 
     saver = tf.train.Saver()
     try:
@@ -71,68 +71,33 @@ def test(model_path=default_model_path):
         print('\nUse default model\n')
         saver.restore(sess, default_model_path)
 
-    with open(output_path, 'w') as out:
+    with open(output_path, 'w') as fout:
         generated_sentences = []
         bleu_score_avg = [0., 0.]
-        for idx, question in enumerate(testing_data):
-            print('question =>', question)
-
-            question = [refine(w) for w in question.lower().split()]
-            question = [word_vector[w] if w in word_vector else np.zeros(dim_wordvec) for w in question]
-            question.insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
-
-            if len(question) > n_encode_lstm_step:
-                question = question[:n_encode_lstm_step]
-            else:
-                for _ in range(len(question), n_encode_lstm_step):
-                    question.append(np.zeros(dim_wordvec))
-
-            question = np.array([question]) # 1x22x300
-    
-            generated_word_index, prob_logit = sess.run([caption_tf, probs], feed_dict={word_vectors: question})
+        dr = Data_Reader(config.test_data_path)
+        n_batch = dr.get_batch_num(batch_size)
+        for batch in range(n_batch):
+            batch_X, batch_Y = dr.generate_training_batch(batch_size)
+            feats = make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector)
+            for idx, (x, y) in enumerate(zip(batch_X, batch_Y)):
+                    
+                generated_words_index, prob_logit = sess.run([caption_tf, probs], feed_dict={word_vectors: [feats[idx]]})
             
-            # remove <unk> to second high prob. word
-            for i in range(len(generated_word_index)):
-                if generated_word_index[i] == 3:
-                    sort_prob_logit = sorted(prob_logit[i][0])
-                    # print('max val', sort_prob_logit[-1])
-                    # print('second max val', sort_prob_logit[-2])
-                    maxindex = np.where(prob_logit[i][0] == sort_prob_logit[-1])[0][0]
-                    secmaxindex = np.where(prob_logit[i][0] == sort_prob_logit[-2])[0][0]
-                    # print('max ind', maxindex, ixtoword[maxindex])
-                    # print('second max ind', secmaxindex, ixtoword[secmaxindex])
-                    generated_word_index[i] = secmaxindex
-
-            generated_words = []
-            for ind in generated_word_index:
-                generated_words.append(ixtoword[ind])
-
-            # generate sentence
-            punctuation = np.argmax(np.array(generated_words) == '<eos>') + 1
-            generated_words = generated_words[:punctuation]
-            generated_sentence = ' '.join(generated_words)
-
-            # modify the output sentence 
-            generated_sentence = generated_sentence.replace('<bos> ', '')
-            generated_sentence = generated_sentence.replace(' <eos>', '')
-            generated_sentence = generated_sentence.replace('--', '')
-            generated_sentence = generated_sentence.split('  ')
-            for i in range(len(generated_sentence)):
-                generated_sentence[i] = generated_sentence[i].strip()
-                if len(generated_sentence[i]) > 1:
-                    generated_sentence[i] = generated_sentence[i][0].upper() + generated_sentence[i][1:] + '.'
-                else:
-                    generated_sentence[i] = generated_sentence[i].upper()
-            generated_sentence = ' '.join(generated_sentence)
-            generated_sentence = generated_sentence.replace(' i ', ' I ')
-            generated_sentence = generated_sentence.replace("i'm", "I'm")
-            generated_sentence = generated_sentence.replace("i'd", "I'd")
-            generated_sentence = generated_sentence.replace("i'll", "I'll")
-            generated_sentence = generated_sentence.replace("i'v", "I'v")
-            generated_sentence = generated_sentence.replace(" - ", "")
-
-            print('generated_sentence =>', generated_sentence)
-            out.write(generated_sentence + '\n')
+                # print("test query: ", x)
+                # print("golden reply: ", y)
+                sent = ""
+                for index in generated_words_index:
+                    sent += ixtoword[index].decode("utf-8")
+                # print("Generated reply: ", sent.encode('utf-8'))
+                # print("***********************")
+                fout.write("test query: " + x)
+                fout.write("\n")
+                fout.write("golden reply: " + y)
+                fout.write("\n")
+                fout.write("Generated reply: " + sent.encode('utf-8'))
+                fout.write("\n")
+                fout.write("***********************")
+                fout.write("\n")
 
 
 if __name__ == "__main__":

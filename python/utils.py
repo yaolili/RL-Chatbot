@@ -6,6 +6,7 @@ import cPickle as pkl
 import jieba.analyse
 import codecs
 import jieba
+import copy
 import config
 
 # Load noun tables, pmi co-table as global variable
@@ -21,8 +22,8 @@ def index2sentence(generated_word_index, prob_logit, ixtoword):
         # pad 0, bos 1, eos 2, unk 3
         cur_ind = generated_word_index[i]
         if cur_ind == 3 or cur_ind <= 1:
-            sort_prob_logit = sorted(prob_logit[i])
-            new_ind = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
+            sort_prob_logit = sorted(prob_logit[i]) # FIXME: out of range (next line)
+            new_ind = np.where(prob_logit[i][0] == sort_prob_logit[-2])[0][0]
             count = 1
             while new_ind <= 3:
                 new_ind = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
@@ -86,21 +87,22 @@ def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncati
     return x
 
 def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=False):
-    for i in range(len(batch_X)):
-        # if batch_X[i] is string, should be split 
-        if not isinstance(batch_X[i], list):
-            batch_X[i] = batch_X[i].strip().split()
-        batch_X[i] = [word_vector[w] if w in word_vector else np.zeros(dim_wordvec) for w in batch_X[i]]
+    batch_X_emb = copy.deepcopy(batch_X)
+    for i in range(len(batch_X_emb)):
+        # if batch_X_emb[i] is string, should be split 
+        if not isinstance(batch_X_emb[i], list):
+            batch_X_emb[i] = batch_X_emb[i].strip().split()
+        batch_X_emb[i] = [word_vector[w.decode("utf-8")] if w.decode("utf-8") in word_vector else np.zeros(dim_wordvec) for w in batch_X_emb[i]]
         if noise:
-            batch_X[i].insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
+            batch_X_emb[i].insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
 
-        if len(batch_X[i]) > n_encode_lstm_step:
-            batch_X[i] = batch_X[i][:n_encode_lstm_step]
+        if len(batch_X_emb[i]) > n_encode_lstm_step:
+            batch_X_emb[i] = batch_X_emb[i][:n_encode_lstm_step]
         else:
-            for _ in range(len(batch_X[i]), n_encode_lstm_step):
-                batch_X[i].append(np.zeros(dim_wordvec))
+            for _ in range(len(batch_X_emb[i]), n_encode_lstm_step):
+                batch_X_emb[i].append(np.zeros(dim_wordvec))
 
-    current_feats = np.asarray(batch_X, np.float32)
+    current_feats = np.asarray(batch_X_emb, np.float32)
     return current_feats # current_feats is word embedding sequence
 
 def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):
@@ -155,7 +157,7 @@ def get_pmi_kw(sentence, topK=1):
     # Here select topK keywords. As topK usually k << logN, so use topK*N instead of N*logN    
     for i in range(topK):
         max_index = pmi_score.index(max(pmi_score))
-        result.append(keywords(max_index))
+        result.append(keywords[max_index])
         pmi_score[max_index] = -1
     return result
 

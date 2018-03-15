@@ -1,12 +1,21 @@
+import model
+
+
 last_two_sentence = True
 
+valid_every = 5000
+print_every = 1000
+test_model_proto = model.Seq2Seq_chatbot
+test_model_path = 'model/Seq2Seq/model-14'
+test_out_path = 'test/seq2seq-14'
+
 # path to training data
-training_data_path = 'data/weibo_data/train_lenmax22_formersents2_with_former_kw.pkl'
-reverseed_data_path = 'data/weibo_data/lenmax22_formersents1_reverse.pkl'
+training_data_path = 'data2/train_origin.txt.kw.pkl'
+reverseed_data_path = 'data2/train_origin.txt.kw.pkl'
 
 # path to test data
-test_data_path = 'data/weibo_data/weibo_data/test_lenmax22_formersents2_with_former.pkl'
-
+test_data_path = 'data2/test_origin.txt.kw.pkl'
+valid_data_path = 'data2/valid_origin.txt.kw.pkl'
 
 # path to pretrain embedding for query
 # Notice: if you change the pretrain_emb size, the dim_wordvec should be changed too.
@@ -36,7 +45,7 @@ start_epoch = 0
 start_batch = 0
 max_epochs = 15
 rl_epochs = 2  # for each depth, iterate N epochs
-batch_size = 1
+batch_size = 32
 
 # training parameters
 learning_rate = 0.0001
@@ -55,8 +64,8 @@ index_list_file = 'data/weibo_data/shuffle_index_list'
 cur_train_index = start_batch * batch_size
 
 # word count threshold
-WC_threshold = 5
-reversed_WC_threshold = 5
+WC_threshold = 10
+reversed_WC_threshold = 10
 
 # dialog simulation turns
 MAX_TURNS = 5

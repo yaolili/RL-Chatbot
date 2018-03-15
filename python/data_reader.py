@@ -8,6 +8,7 @@ import random
 class Data_Reader:
     def __init__(self, training_data_path, cur_train_index=0, load_list=False):
         self.training_data = pickle.load(open(training_data_path, 'rb'))
+        print("Read %s done!" % training_data_path)
         self.data_size = len(self.training_data)
         if load_list:
             self.shuffle_list = pickle.load(open(config.index_list_file, 'rb'))
@@ -59,13 +60,13 @@ class Data_Reader:
         return batch_X
 
 if __name__ == "__main__":
-    dr = Data_Reader('data/weibo_data/train_lenmax22_formersents2_with_former_kw.pkl')
-    batch_X, _, former, _ = dr.generate_training_batch_with_former(50)
+    dr = Data_Reader('data2/train_origin.txt.kw.pkl')
+    print("Load done!")
+    batch_X, batch_Y = dr.generate_training_batch(50)
     for i in range(50):
-        if len(former[i].split()) == 0:
-            print(batch_X)
-            print(i)
-            exit()
-        else:
-            print("***")
-
+        print(batch_X)
+        for each in batch_X:
+            print(each.decode("utf-8"))
+        print("*****")
+        exit()
+        
