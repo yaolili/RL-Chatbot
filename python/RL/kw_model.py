@@ -164,4 +164,4 @@ class Kw_chatbot():
 
             embeds.append(current_embed)
 
-        return word_vectors, generated_words, probs, embeds
+        return word_vectors, kw_vectors, generated_words, probs, embeds
