@@ -1,13 +1,15 @@
-import model
+import sys
+sys.path.append('/S2/WIP/yaoll/RL-Chatbot/python/RL')
+import kw_model
 
 
 last_two_sentence = True
 
 valid_every = 5000
 print_every = 1000
-test_model_proto = model.Seq2Seq_chatbot
+test_model_proto = kw_model.Kw_chatbot
 test_model_path = 'model/Seq2Seq/model-14'
-test_out_path = 'test/seq2seq-14'
+test_out_path = 'test/seq-14'
 
 # path to training data
 training_data_path = 'data2/train_origin.txt.kw.pkl'
@@ -27,19 +29,19 @@ all_nouns_path = 'data/weibo_data/keywords_dict.1w.tok'
 pmi_dict_path = 'data/weibo_data/pmi_dict.pkl'
 
 
-CHECKPOINT = False  # reload 
+CHECKPOINT = True  # reload 
 training_type = 'normal' # 'normal' for seq2seq training, 'pg' for policy gradient
 train_model_path = 'model/Seq2Seq/'
 train_model_name = 'model-14'
 
 reversed_model_path = 'model/Reversed/' # only uesed for Li's baseline
-reversed_model_name = 'model-14'
+reversed_model_name = 'model-10'
 
 kw_model_path = 'model/Kw/'
 kw_model_name = 'model-0'
 
 rl_model_path = 'model/RL/'
-rl_model_name = 'model-0'
+rl_model_name = 'model-10'
 
 start_epoch = 0
 start_batch = 0
@@ -71,6 +73,7 @@ reversed_WC_threshold = 10
 MAX_TURNS = 5
 
 # reward coefficient
+discount = 0.9
 alpha1 = 0.25
 alpha2 = 0.25
 alpha3 = 0.5

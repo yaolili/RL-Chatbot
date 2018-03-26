@@ -160,20 +160,18 @@ class PolicyGradient_chatbot():
 
             logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
             max_prob_index = tf.argmax(logit_words, 1)
-            # print('max_prob_index.shape', max_prob_index.get_shape())
-            # max_prob_index = tmp[0]
-            # max_prob_index = tf.reshape(max_prob_index, [self.batch_size, -1])
-            # print('max_prob_index.shape', max_prob_index.get_shape())
             generated_words.append(max_prob_index)
-            # print('len(generated_words)', len(generated_words))
             probs.append(logit_words)
-            # print('len(probs)', len(probs))
 
             # with tf.device("/cpu:0"):
             current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
-
             embeds.append(current_embed)
 
+        # NOTICE! need to stack!
+        generated_words = tf.stack(generated_words, axis=1)
+        probs = tf.stack(probs, axis=1)
+        embeds = tf.stack(embeds, axis=1)    
+            
         encode_feats = {
             'encode_states': encode_states
         }
