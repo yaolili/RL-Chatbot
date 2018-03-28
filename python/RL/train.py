@@ -256,17 +256,14 @@ def train():
                 # actions : a list of sentences ['', '',..., '']
                 actions = []
                 for i in range(len(action_word_indexs)):
-                    # double check here!
-                    # action = index2sentence(
-                                # generated_word_index=action_word_indexs[i], 
-                                # prob_logit=action_probs[i],
-                                # ixtoword=ixtoword)
-                    # assert len(action.strip().split()) > 0, "Empty action!"
                     action = []
                     for index in action_word_indexs[i]:
                         action.append(ixtoword[index].decode("utf-8"))
-                    print("generated action: ", " ".join(action))
+                        # eos
+                        if index == 2: break
+                    print("generated {} action: {}".format(i, " ".join(action)))
                     actions.append(" ".join(action))
+                print("*************************************************")
                 
 
                 ################ ease of answering ################
@@ -324,8 +321,13 @@ def train():
                 # next_batch_X = former + actions
                 next_batch_X = []
                 for i in range(batch_size):
-                    next_batch_X.append(former[i] + actions[i])
-                    print("next query: ")
+                    actions[i] = actions[i].replace("<eos>", "").strip() 
+                    next_batch_X.append(former[i] + " " + actions[i])
+                    # print("next {} query: {}".format(i, former[i] + " " + actions[i]))
+                    # remember to update former!
+                    former[i] = actions[i]
+                print("**********************************")
+                
 
                 next_feats = make_batch_X(
                                 batch_X=copy.deepcopy(next_batch_X), 
