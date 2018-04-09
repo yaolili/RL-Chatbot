@@ -61,6 +61,8 @@ alpha2 = float(config.alpha2)
 alpha3 = float(config.alpha3)
 max_turns = config.MAX_TURNS
 
+summary_dir = 'summary'
+
 # here should be unicode
 dull_set = [u"哦哦哦 好 的", u"嘿嘿", u"嘻嘻 嘻", u"么 么 哒", u"啊啊啊 啊啊啊 啊", u"那 你 很 棒棒 呦", u"哈哈哈哈 哈哈哈", u"厉害 了", u"啧啧 啧", u"是 滴", u"怎么 啦"]
 
@@ -207,7 +209,14 @@ def train():
          
     # TODO: figure out load_list
     dr = Data_Reader(training_data_path, cur_train_index=config.cur_train_index, load_list=config.load_list)
-
+    
+    with tf.name_scope("train"):
+        train_summary = tf.summary.scalar('loss', loss)
+    with tf.name_scope("valid"):
+        valid_summary = tf.summary.scalar('loss', loss)
+    writer = tf.summary.FileWriter(summary_dir, sess.graph)
+    
+    
     # simulation
     for epoch in range(start_epoch, epochs):
         n_batch = dr.get_batch_num(batch_size)
@@ -215,9 +224,13 @@ def train():
         for batch in range(sb, n_batch):
             start_time = time.time()
 
+            print("Epoch {} batch {}: ".format(epoch, batch))
+            
             # batch_x is used as the seed for agent A to start the conversation
             batch_X, batch_Y, former, _ = dr.generate_training_batch_with_former(batch_size)
             
+            # for i in range(batch_size):
+                # print("query {}: {}".format(i, batch_X[i]))
             
             current_feats = make_batch_X(
                                 batch_X=copy.deepcopy(batch_X), 
@@ -230,10 +243,10 @@ def train():
             states = []
 
             def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, states, flag=False):
+                t1 = time.time()
+                
                 if cur_turn >= max_turns:
                     return cur_reward
-                
-                print("current turn: ", cur_turn)
                 
                 # rl action: generate batch_size sents, use build_generator()
                 current_feats_states, action_word_indexs, action_decode_feats = sess.run([encode_feats, generated_words, decode_feats],
@@ -261,11 +274,11 @@ def train():
                         action.append(ixtoword[index].decode("utf-8"))
                         # eos
                         if index == 2: break
-                    print("generated {} action: {}".format(i, " ".join(action)))
                     actions.append(" ".join(action))
-                print("*************************************************")
                 
-
+                t2 = time.time()
+                print("Before reward calculate, Elapsed time: {}".format(t2 - t1))
+                
                 ################ ease of answering ################
                 action_feats = make_batch_X(
                                 batch_X=copy.deepcopy(actions), 
@@ -275,10 +288,13 @@ def train():
                                 
 
                 dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
-
+                t3 = time.time()
+                print("dull reward, Elapsed time: {}".format(t3 - t2))
+                
                 ################ information flow ################
                 information_reward = info_flow_reward(sess, word_vectors, encode_feats, action_feats, states)
-
+                t4 = time.time()
+                print("information reward, Elapsed time: {}".format(t4 - t3))
 
                 ################ semantic coherence ################
                 action_caption_matrix, action_caption_masks = make_batch_Y(
@@ -313,9 +329,9 @@ def train():
                 backward_entropies = backward_inter['entropies']
 
                 semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
-
-
-
+                t5 = time.time()
+                print("semantic reward, Elapsed time: {}".format(t5 - t4))
+ 
                 reward = total_reward(dull_reward, information_reward, semantic_reward)
 
                 # next_batch_X = former + actions
@@ -326,7 +342,7 @@ def train():
                     # print("next {} query: {}".format(i, former[i] + " " + actions[i]))
                     # remember to update former!
                     former[i] = actions[i]
-                print("**********************************")
+                # print("**********************************")
                 
 
                 next_feats = make_batch_X(
@@ -343,7 +359,6 @@ def train():
             expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, states, flag=True)
 
             expected_reward = 1.0 / max_turns * expected_reward
-            print("expected_reward: ", expected_reward)
             
             
             feed_dict = {
@@ -353,16 +368,16 @@ def train():
                     input_tensors['reward']: expected_reward
                 }
 
-            if batch % 10 == 0:
-                _, loss_val = sess.run([train_op, loss], feed_dict = feed_dict)
+            if batch % config.print_every == 0:
+                _, loss_val, t_summary = sess.run(
+                        [train_op, loss, train_summary], feed_dict = feed_dict)
+                writer.add_summary(t_summary, n_batch * epoch + batch)  # x
                 print("Epoch: {}, batch: {}, loss: {}, Elapsed time: {}".format(epoch, batch, loss_val, time.time() - start_time))
             else:
                 _ = sess.run(train_op, feed_dict = feed_dict)
-
-            if batch % 1000 == 0 and batch != 0:
-                print("Epoch {} batch {} is done. Saving the model ...".format(epoch, batch))
-                saver.save(sess, os.path.join(model_path, 'model-{}-{}'.format(epoch, batch)))
-
+                print("Epoch: {}, batch: {}, Elapsed time: {}".format(epoch, batch, time.time() - start_time))
+            
+            
         print("Epoch ", epoch, " is done. Saving the model ...")
         saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
 
