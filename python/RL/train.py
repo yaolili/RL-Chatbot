@@ -88,7 +88,7 @@ def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix,
             if cur_len == 0: break
             cur_loss += np.sum(d_entropies[i]) / cur_len
 
-        d_loss = -1. / len(dull_set) * cur_loss
+        d_loss = 1. / len(dull_set) * cur_loss
         dull_reward.append(d_loss)
 
     return dull_reward
@@ -104,10 +104,17 @@ def semantic_coherence_rewards(forward_entropy, backward_entropy, forward_target
     for i in range(batch_size):
         forward_len = len(forward_target[i].split())
         backward_len = len(backward_target[i].split())
-        assert forward_len > 0 and backward_len > 0, "Empty forward_target or backward_target"
+        # assert forward_len > 0 and backward_len > 0, "Empty forward_target or backward_target"
+        if not (forward_len > 0 and backward_len > 0):
+            print("i: {}".format(i))
+            print("forward_target[i]: {}".format(forward_target[i]))
+            print("backward_target[i]: {}".format(backward_target[i]))
+            exit()
         forward_reward.append(np.sum(forward_entropy[i]) / forward_len)
         backward_reward.append(np.sum(backward_entropy[i]) / backward_len)
-        semantic_reward.append(forward_reward[i] + backward_reward[i])
+        # print("forward_reward {}: {}".format(i, forward_reward[i]))
+        # print("backward_reward {}: {}".format(i, backward_reward[i]))
+        semantic_reward.append(-1. * (forward_reward[i] + backward_reward[i]))
     return semantic_reward
 
 
@@ -119,7 +126,7 @@ def info_flow_reward(sess, word_vectors, encode_feats, action_feats, states):
     # last encode hidden state
     cur_turn_state = cur_turn_state['encode_states'][-1]
     states.append(cur_turn_state)
-    # if there is no former consecutive turns, assign a positive reward
+    # FIXME: if there is no former consecutive turns, assign a positive reward 100
     if len(states) < 3:
         return [100.] * batch_size
     last_turn_state = states[-3]
@@ -132,15 +139,18 @@ def info_flow_reward(sess, word_vectors, encode_feats, action_feats, states):
 
 
 def total_reward(dull_reward, information_reward, semantic_reward):
-    '''
-    print("dull_reward: ", dull_reward)
-    print("information_reward: ", information_reward)
-    print("semantic_reward: ", semantic_reward)
-    '''
+    # print("dull_reward: ", dull_reward)
+    # print("information_reward: ", information_reward)
+    # print("semantic_reward: ", semantic_reward)
+    
     dull_reward = alpha1 * np.array(dull_reward)
     information_reward = alpha2 * np.array(information_reward)
     semantic_reward = alpha3 * np.array(semantic_reward)
     all_reward = (dull_reward + information_reward + semantic_reward) 
+    
+    # Future work: scale
+    # rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
+    
     all_reward = all_reward.reshape(all_reward.shape+(1,))
     all_reward = np.tile(all_reward, n_decode_lstm_step)
     return all_reward
@@ -207,7 +217,6 @@ def train():
         saver2.restore(sess2, os.path.join(reversed_model_path, reversed_model_name))
         print("Reversed model {} restored.".format(reversed_model_name))
          
-    # TODO: figure out load_list
     dr = Data_Reader(training_data_path, cur_train_index=config.cur_train_index, load_list=config.load_list)
     
     with tf.name_scope("train"):
@@ -241,39 +250,35 @@ def train():
             current_caption_matrix, current_caption_masks = make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step)
             
             states = []
-
-            def _expected_reward(cur_turn, max_turns, cur_reward, current_feats, former, states, flag=False):
+            
+            expected_reward = 0.
+            
+            next_feats = copy.deepcopy(current_feats)
+            next_former = copy.deepcopy(former)
+            
+            for i in range(max_turns):
+                print("current turn {}: ".format(i))
+                
                 t1 = time.time()
-                
-                if cur_turn >= max_turns:
-                    return cur_reward
-                
-                # rl action: generate batch_size sents, use build_generator()
+                # generate reply
                 current_feats_states, action_word_indexs, action_decode_feats = sess.run([encode_feats, generated_words, decode_feats],
                     feed_dict={
-                       word_vectors: current_feats
+                       word_vectors: next_feats
                     })
-
-                # states used for info_flow_reward 
-                if flag:
-                    assert cur_turn == 0, "Only the first step we regard the query as first agent's state"
-                    # last encode step hidden state
-                    current_feats_states = current_feats_states['encode_states'][-1]
-                    states.append(current_feats_states)
-
+                
+                # states used for info_flow_reward, Only the first step we regard the query as first agent's state
+                if i == 0:
+                    states.append(current_feats_states['encode_states'][-1])
+                    
                 action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
-
-                action_probs = action_decode_feats['probs']
-                action_probs = np.array(action_probs).reshape(batch_size, n_decode_lstm_step, -1)
-
-                # actions : a list of sentences ['', '',..., '']
+                
                 actions = []
-                for i in range(len(action_word_indexs)):
+                for j in range(len(action_word_indexs)):
                     action = []
-                    for index in action_word_indexs[i]:
+                    for index in action_word_indexs[j]:
                         action.append(ixtoword[index].decode("utf-8"))
-                        # eos
-                        if index == 2: break
+                        if index == 2: break # eos
+                    # print("generated {} reply: {}".format(j, " ".join(action)))
                     actions.append(" ".join(action))
                 
                 t2 = time.time()
@@ -288,11 +293,13 @@ def train():
                                 
 
                 dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
+                
                 t3 = time.time()
                 print("dull reward, Elapsed time: {}".format(t3 - t2))
                 
                 ################ information flow ################
                 information_reward = info_flow_reward(sess, word_vectors, encode_feats, action_feats, states)
+                
                 t4 = time.time()
                 print("information reward, Elapsed time: {}".format(t4 - t3))
 
@@ -305,14 +312,19 @@ def train():
 
                 forward_inter = sess.run(feats,
                                  feed_dict={
-                                    input_tensors['word_vectors']: current_feats,
+                                    input_tensors['word_vectors']: next_feats,
                                     input_tensors['caption']: action_caption_matrix,
                                     input_tensors['caption_mask']: action_caption_masks,
                                     input_tensors['reward']: ones_reward
                                 })
                 forward_entropies = forward_inter['entropies']
+                
+                # for j in range(batch_size):
+                    # print("caption(next_former) {}: {}".format(j, next_former[j]))
+                    # print("query(actions) {}: {}".format(j, actions[j]))
+                
                 former_caption_matrix, former_caption_masks = make_batch_Y(
-                                                                batch_Y=copy.deepcopy(former), 
+                                                                batch_Y=copy.deepcopy(next_former), 
                                                                 wordtoix=wordtoix, 
                                                                 n_decode_lstm_step=n_decode_lstm_step)
                 r_action_feats = make_batch_X(
@@ -328,20 +340,23 @@ def train():
                                 })
                 backward_entropies = backward_inter['entropies']
 
-                semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, former)
+                semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, next_former)
                 t5 = time.time()
                 print("semantic reward, Elapsed time: {}".format(t5 - t4))
  
                 reward = total_reward(dull_reward, information_reward, semantic_reward)
+                # print("reward is: {}".format(reward))
 
                 # next_batch_X = former + actions
                 next_batch_X = []
-                for i in range(batch_size):
-                    actions[i] = actions[i].replace("<eos>", "").strip() 
-                    next_batch_X.append(former[i] + " " + actions[i])
-                    # print("next {} query: {}".format(i, former[i] + " " + actions[i]))
+                for j in range(batch_size):
+                    actions[j] = actions[j].replace("<eos>", "").strip() 
+                    next_batch_X.append(former[j] + " " + actions[j])
+                    # print("next {} query: {}".format(j, former[j] + " " + actions[j]))
                     # remember to update former!
-                    former[i] = actions[i]
+                    former[j] = copy.deepcopy(actions[j])
+                    
+                next_former = copy.deepcopy(actions)
                 # print("**********************************")
                 
 
@@ -350,14 +365,11 @@ def train():
                                 n_encode_lstm_step=n_encode_lstm_step, 
                                 dim_wordvec=dim_wordvec,
                                 word_vector=word_vector)
-
-
-                return _expected_reward(cur_turn + 1, max_turns, pow(discount, cur_turn) * cur_reward + reward, next_feats, actions, states)
-
-
-
-            expected_reward = _expected_reward(0, max_turns, 0, current_feats, former, states, flag=True)
-
+                                
+                                
+                expected_reward += pow(discount, i) * reward
+            
+            # NOTICE: loss = -log p() * reward , so must be negative
             expected_reward = 1.0 / max_turns * expected_reward
             
             

@@ -105,6 +105,10 @@ class PolicyGradient_chatbot():
             'reward': reward
         }
 
+        entropies = tf.stack(entropies, axis=1)
+        probs = tf.stack(probs, axis=1)
+        states = tf.stack(states, axis=1)
+        
         feats = {
             'entropies': entropies,
             'probs': probs,
@@ -167,8 +171,9 @@ class PolicyGradient_chatbot():
             current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
             embeds.append(current_embed)
 
-        # NOTICE! need to stack!
+        # NOTICE! need to stack! n_decode_step * batch -> batch * n_decode_step
         generated_words = tf.stack(generated_words, axis=1)
+        encode_states = tf.stack(encode_states, axis=1)
         probs = tf.stack(probs, axis=1)
         embeds = tf.stack(embeds, axis=1)    
             
