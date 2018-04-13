@@ -64,17 +64,15 @@ max_turns = config.MAX_TURNS
 summary_dir = 'summary'
 
 # here should be unicode
-dull_set = [u"哦哦哦 好 的", u"嘿嘿", u"嘻嘻 嘻", u"么 么 哒", u"啊啊啊 啊啊啊 啊", u"那 你 很 棒棒 呦", u"哈哈哈哈 哈哈哈", u"厉害 了", u"啧啧 啧", u"是 滴", u"怎么 啦"]
+dull_set = [u"我 是 小 仙女", u"你 是 <unk>", u"我 也 想 你", u"我 在 <unk>", u"你 开心 就 好"]
 
 ones_reward = np.ones([batch_size, n_decode_lstm_step])
 
 
 def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask):
-    dull_reward = np.array([0.] * batch_size)
+    dull_reward = np.zeros(batch_size)
     # Each action vector should calculate the reward of each dull_sentence in dull set
-    for i, (cp, cp_m) in enumerate(zip(dull_matrix, dull_mask)):
-        cur_dull_matrix = np.array([cp for _ in range(batch_size)])
-        cur_dull_mask = np.array([cp_m for _ in range(batch_size)])
+    for i, (cur_dull_matrix, cur_dull_mask) in enumerate(zip(dull_matrix, dull_mask)):
         d_feats = sess.run(feats,
                      feed_dict={
                         input_tensors['word_vectors']: action_feats,
@@ -87,28 +85,6 @@ def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix,
         cur_len = len(dull_set[i].strip().split())
         dull_reward += np.sum(d_entropies, axis=1) / cur_len    
     dull_reward /= len(dull_set)
-        
-        
-    
-    # for vector in action_feats:
-        # action_batch_X = np.array([vector for _ in range(batch_size)])
-        # d_feats = sess.run(feats,
-                     # feed_dict={
-                        # input_tensors['word_vectors']: action_batch_X,
-                        # input_tensors['caption']: dull_matrix,
-                        # input_tensors['caption_mask']: dull_mask,
-                        # input_tensors['reward']: ones_reward
-                    # })
-        # d_entropies = np.array(d_feats['entropies']).reshape(batch_size, n_decode_lstm_step)
-        # cur_loss = 0.
-        # for i in range(batch_size):
-            # cur_len = len(dull_set[i].strip().split())
-            # if cur_len == 0: break
-            # cur_loss += np.sum(d_entropies[i]) / cur_len
-
-        # d_loss = 1. / len(dull_set) * cur_loss
-        # dull_reward.append(d_loss)
-    print("dull reward shape: {}".format(dull_reward.shape))
     return dull_reward
 
 
@@ -182,16 +158,21 @@ def train():
     wordtoix, ixtoword, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
     word_vector = KeyedVectors.load_word2vec_format(pretrain_emb, binary=True)
 
-    # Prepare for ease of answering
-    # if len(dull_set) > batch_size:
-        # dull_set = dull_set[:batch_size]
-    # else:
-        # for _ in range(len(dull_set), batch_size):
-            # dull_set.append('')
-    dull_matrix, dull_mask = make_batch_Y(
+    # Prepare for ease of answering 
+    origin_dull_matrix, origin_dull_mask = make_batch_Y(
                                 batch_Y=dull_set, 
                                 wordtoix=wordtoix, 
                                 n_decode_lstm_step=n_decode_lstm_step)
+                                
+    # batch normalization, len(dull_set) * batch * n_decode_lstm_step
+    dull_matrix = []
+    dull_mask = []
+    for i, (cp, cp_m) in enumerate(zip(origin_dull_matrix, origin_dull_mask)):
+        cur_dull_matrix = np.asarray([cp for _ in range(batch_size)])
+        cur_dull_mask = np.asarray([cp_m for _ in range(batch_size)])
+        dull_matrix.append(cur_dull_matrix)
+        dull_mask.append(cur_dull_mask)
+        
 
     g1 = tf.Graph()
     g2 = tf.Graph()
@@ -260,7 +241,7 @@ def train():
                 # print("query {}: {}".format(i, batch_X[i]))
             
             current_feats = make_batch_X(
-                                batch_X=copy.deepcopy(batch_X), 
+                                batch_X=batch_X, 
                                 n_encode_lstm_step=n_encode_lstm_step, 
                                 dim_wordvec=dim_wordvec,
                                 word_vector=word_vector)
@@ -272,7 +253,7 @@ def train():
             expected_reward = 0.
             
             next_feats = copy.deepcopy(current_feats)
-            next_former = copy.deepcopy(former)
+            next_former = former
             
             for i in range(max_turns):
                 print("current turn {}: ".format(i))
@@ -288,27 +269,69 @@ def train():
                 if i == 0:
                     states.append(current_feats_states['encode_states'])
                     
-                action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
+                action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)           
+
+                t_m = time.time()
+                # print("Before make batch x & y, Elapsed time: {}".format(t_m - t1))
                 
-                actions = []
-                for j in range(len(action_word_indexs)):
+                # To speed up, we don't use make_batch_X & make_batch_Y from utils
+                actions = [] # Each element is Chinese sentence
+                action_feats = [] # make_batch_X
+                action_caption_matrix = [] # make_batch_Y
+                action_caption_masks = [] # make_batch_Y
+                
+                for j in range(batch_size):
                     action = []
-                    for index in action_word_indexs[j]:
-                        action.append(ixtoword[index].decode("utf-8"))
+                    cur_feats = []
+                    # add bos 
+                    cur_caption = [0] * (n_decode_lstm_step + 1)
+                    cur_caption[0] = wordtoix['<bos>']
+                    cur_mask = np.zeros(n_decode_lstm_step + 1)
+                    cur_mask[0] = 1.
+                    for k in range(len(action_word_indexs[j])):
+                        index = action_word_indexs[j][k]
+                        if k < n_decode_lstm_step - 1:
+                            cur_caption[k+1] = index
+                        word = ixtoword[index].decode("utf-8")
+                        action.append(word)
+                        if word not in word_vector:
+                            cur_feats.append(np.zeros(dim_wordvec))
+                        else: cur_feats.append(word_vector[word])
                         if index == 2: break # eos
-                    # print("generated {} reply: {}".format(j, " ".join(action)))
+                    
+                    # make_batch_X
+                    if len(action) > n_encode_lstm_step:
+                        cur_feats = cur_feats[:n_encode_lstm_step]
+                    else:
+                        for _ in range(len(action), n_encode_lstm_step):
+                            cur_feats.append(np.zeros(dim_wordvec))
+                    action_feats.append(cur_feats)
+                    
+                    # make_batch_Y
+                    pos = len(action) if len(action) < n_decode_lstm_step else n_decode_lstm_step - 1
+                    cur_caption[pos] = wordtoix['<eos>']
+                    
+                    action_caption_matrix.append(cur_caption)
+                    cur_mask[:pos+2] = 1.
+                    action_caption_masks.append(cur_mask)
+
+                    
                     actions.append(" ".join(action))
+                    # if j < 5:
+                        # print("generated {} reply: {}".format(j, " ".join(action)))
+                    
+                action_feats = np.asarray(action_feats)
+                action_caption_matrix = np.asarray(action_caption_matrix)
+                action_caption_masks = np.asarray(action_caption_masks)
+                
+                # print("action_feats:{}".format(action_feats))
+                # print("action_caption:{}".format(action_caption_matrix))
+                # print("action_mask:{}".format(action_caption_masks))
                 
                 t2 = time.time()
-                print("Before reward calculate, Elapsed time: {}".format(t2 - t1))
+                print("make_batch_X & Y, Elapsed time: {}".format(t2 - t_m))
                 
-                ################ ease of answering ################
-                action_feats = make_batch_X(
-                                batch_X=copy.deepcopy(actions), 
-                                n_encode_lstm_step=n_encode_lstm_step, 
-                                dim_wordvec=dim_wordvec,
-                                word_vector=word_vector)
-                                
+                ################ ease of answering ################                              
 
                 dull_reward = ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask)
                 
@@ -322,12 +345,6 @@ def train():
                 print("information reward, Elapsed time: {}".format(t4 - t3))
 
                 ################ semantic coherence ################
-                action_caption_matrix, action_caption_masks = make_batch_Y(
-                                                                batch_Y=copy.deepcopy(actions),
-                                                                wordtoix=wordtoix, 
-                                                                n_decode_lstm_step=n_decode_lstm_step)
-
-
                 forward_inter = sess.run(feats,
                                  feed_dict={
                                     input_tensors['word_vectors']: next_feats,
@@ -342,14 +359,10 @@ def train():
                     # print("query(actions) {}: {}".format(j, actions[j]))
                 
                 former_caption_matrix, former_caption_masks = make_batch_Y(
-                                                                batch_Y=copy.deepcopy(next_former), 
+                                                                batch_Y=next_former, 
                                                                 wordtoix=wordtoix, 
                                                                 n_decode_lstm_step=n_decode_lstm_step)
-                r_action_feats = make_batch_X(
-                                batch_X=copy.deepcopy(actions), 
-                                n_encode_lstm_step=r_n_encode_lstm_step, 
-                                dim_wordvec=dim_wordvec,
-                                word_vector=word_vector)
+                r_action_feats = action_feats
                 backward_inter = sess2.run(reverse_inter,
                                  feed_dict={
                                     r_word_vectors: r_action_feats,
@@ -359,6 +372,7 @@ def train():
                 backward_entropies = backward_inter['entropies']
 
                 semantic_reward = semantic_coherence_rewards(forward_entropies, backward_entropies, actions, next_former)
+                
                 t5 = time.time()
                 print("semantic reward, Elapsed time: {}".format(t5 - t4))
  
@@ -370,16 +384,17 @@ def train():
                 for j in range(batch_size):
                     actions[j] = actions[j].replace("<eos>", "").strip() 
                     next_batch_X.append(former[j] + " " + actions[j])
-                    # print("next {} query: {}".format(j, former[j] + " " + actions[j]))
+                    # if j < 5:
+                        # print("next {} query: {}".format(j, former[j] + " " + actions[j]))
                     # remember to update former!
-                    former[j] = copy.deepcopy(actions[j])
+                    former[j] = actions[j]
                     
-                next_former = copy.deepcopy(actions)
-                # print("**********************************")
+                next_former = actions
+                print("**********************************")
                 
 
                 next_feats = make_batch_X(
-                                batch_X=copy.deepcopy(next_batch_X), 
+                                batch_X=next_batch_X, 
                                 n_encode_lstm_step=n_encode_lstm_step, 
                                 dim_wordvec=dim_wordvec,
                                 word_vector=word_vector)
