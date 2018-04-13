@@ -46,7 +46,6 @@ class PolicyGradient_chatbot():
         padding = tf.zeros([self.batch_size, self.dim_hidden])
 
         probs = []
-        states = []
         entropies = []
         pg_loss = 0.  # policy gradient loss
 
@@ -57,7 +56,6 @@ class PolicyGradient_chatbot():
 
             with tf.variable_scope("LSTM1"):
                 output1, state1 = self.lstm1(wordvec_emb[:, i, :], state1)
-                states.append(state1)
 
             with tf.variable_scope("LSTM2"):
                 output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
@@ -107,12 +105,10 @@ class PolicyGradient_chatbot():
 
         entropies = tf.stack(entropies, axis=1)
         probs = tf.stack(probs, axis=1)
-        states = tf.stack(states, axis=1)
         
         feats = {
             'entropies': entropies,
-            'probs': probs,
-            'states': states
+            'probs': probs
         }
 
         return train_op, pg_loss, input_tensors, feats
@@ -173,12 +169,12 @@ class PolicyGradient_chatbot():
 
         # NOTICE! need to stack! n_decode_step * batch -> batch * n_decode_step
         generated_words = tf.stack(generated_words, axis=1)
-        encode_states = tf.stack(encode_states, axis=1)
         probs = tf.stack(probs, axis=1)
         embeds = tf.stack(embeds, axis=1)    
-            
+        
+        # NOTICE! no need to stack encode_feats, as we only use last hidden states
         encode_feats = {
-            'encode_states': encode_states
+            'encode_states': encode_states[-1]
         }
 
         decode_feats = {

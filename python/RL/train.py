@@ -70,27 +70,45 @@ ones_reward = np.ones([batch_size, n_decode_lstm_step])
 
 
 def ease_of_answer_reward(sess, feats, input_tensors, action_feats, dull_matrix, dull_mask):
-    dull_reward = []
+    dull_reward = np.array([0.] * batch_size)
     # Each action vector should calculate the reward of each dull_sentence in dull set
-    for vector in action_feats:
-        action_batch_X = np.array([vector for _ in range(batch_size)])
+    for i, (cp, cp_m) in enumerate(zip(dull_matrix, dull_mask)):
+        cur_dull_matrix = np.array([cp for _ in range(batch_size)])
+        cur_dull_mask = np.array([cp_m for _ in range(batch_size)])
         d_feats = sess.run(feats,
                      feed_dict={
-                        input_tensors['word_vectors']: action_batch_X,
-                        input_tensors['caption']: dull_matrix,
-                        input_tensors['caption_mask']: dull_mask,
+                        input_tensors['word_vectors']: action_feats,
+                        input_tensors['caption']: cur_dull_matrix,
+                        input_tensors['caption_mask']: cur_dull_mask,
                         input_tensors['reward']: ones_reward
                     })
         d_entropies = np.array(d_feats['entropies']).reshape(batch_size, n_decode_lstm_step)
-        cur_loss = 0.
-        for i in range(batch_size):
-            cur_len = len(dull_set[i].strip().split())
-            if cur_len == 0: break
-            cur_loss += np.sum(d_entropies[i]) / cur_len
 
-        d_loss = 1. / len(dull_set) * cur_loss
-        dull_reward.append(d_loss)
+        cur_len = len(dull_set[i].strip().split())
+        dull_reward += np.sum(d_entropies, axis=1) / cur_len    
+    dull_reward /= len(dull_set)
+        
+        
+    
+    # for vector in action_feats:
+        # action_batch_X = np.array([vector for _ in range(batch_size)])
+        # d_feats = sess.run(feats,
+                     # feed_dict={
+                        # input_tensors['word_vectors']: action_batch_X,
+                        # input_tensors['caption']: dull_matrix,
+                        # input_tensors['caption_mask']: dull_mask,
+                        # input_tensors['reward']: ones_reward
+                    # })
+        # d_entropies = np.array(d_feats['entropies']).reshape(batch_size, n_decode_lstm_step)
+        # cur_loss = 0.
+        # for i in range(batch_size):
+            # cur_len = len(dull_set[i].strip().split())
+            # if cur_len == 0: break
+            # cur_loss += np.sum(d_entropies[i]) / cur_len
 
+        # d_loss = 1. / len(dull_set) * cur_loss
+        # dull_reward.append(d_loss)
+    print("dull reward shape: {}".format(dull_reward.shape))
     return dull_reward
 
 
@@ -124,7 +142,7 @@ def info_flow_reward(sess, word_vectors, encode_feats, action_feats, states):
                         word_vectors: action_feats,
                     })
     # last encode hidden state
-    cur_turn_state = cur_turn_state['encode_states'][-1]
+    cur_turn_state = cur_turn_state['encode_states']
     states.append(cur_turn_state)
     # FIXME: if there is no former consecutive turns, assign a positive reward 100
     if len(states) < 3:
@@ -165,11 +183,11 @@ def train():
     word_vector = KeyedVectors.load_word2vec_format(pretrain_emb, binary=True)
 
     # Prepare for ease of answering
-    if len(dull_set) > batch_size:
-        dull_set = dull_set[:batch_size]
-    else:
-        for _ in range(len(dull_set), batch_size):
-            dull_set.append('')
+    # if len(dull_set) > batch_size:
+        # dull_set = dull_set[:batch_size]
+    # else:
+        # for _ in range(len(dull_set), batch_size):
+            # dull_set.append('')
     dull_matrix, dull_mask = make_batch_Y(
                                 batch_Y=dull_set, 
                                 wordtoix=wordtoix, 
@@ -268,7 +286,7 @@ def train():
                 
                 # states used for info_flow_reward, Only the first step we regard the query as first agent's state
                 if i == 0:
-                    states.append(current_feats_states['encode_states'][-1])
+                    states.append(current_feats_states['encode_states'])
                     
                 action_word_indexs = np.array(action_word_indexs).reshape(batch_size, n_decode_lstm_step)                    
                 
