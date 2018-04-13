@@ -1,6 +1,9 @@
-# coding=utf-8
+#-*- coding: utf-8 -*-
 
 from __future__ import print_function
+import sys
+reload(sys)                      
+sys.setdefaultencoding('utf-8') 
 import numpy as np
 import cPickle as pkl
 import jieba.analyse
@@ -8,6 +11,7 @@ import codecs
 import jieba
 import copy
 import config
+
 
 # Load noun tables, pmi co-table as global variable
 keywords = codecs.open(config.all_nouns_path).readlines()
@@ -23,7 +27,7 @@ def index2sentence(generated_word_index, prob_logit, ixtoword):
         cur_ind = generated_word_index[i]
         if cur_ind == 3 or cur_ind <= 1:
             sort_prob_logit = sorted(prob_logit[i]) # FIXME: out of range (next line)
-            new_ind = np.where(prob_logit[i][0] == sort_prob_logit[-2])[0][0]
+            new_ind = np.where(prob_logit[i] == sort_prob_logit[-2])[0][0]
             count = 1
             while new_ind <= 3:
                 new_ind = np.where(prob_logit[i] == sort_prob_logit[(-2)-count])[0][0]
@@ -62,6 +66,7 @@ def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncati
             break
 
     x = (np.ones((num_samples, maxlen) + sample_shape) * value).astype(dtype)
+    print("x shape: {}".format(x.shape))
     for idx, s in enumerate(sequences):
         if not len(s):
             continue  # empty list/array was found
@@ -92,6 +97,24 @@ def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=Fa
         # if batch_X_emb[i] is string, should be split 
         if not isinstance(batch_X_emb[i], list):
             batch_X_emb[i] = batch_X_emb[i].strip().split()
+            
+        # cur = []
+        # count = 0
+        # for w in batch_X_emb[i]:
+            # word = w.decode("utf-8")
+            # if word not in word_vector:
+                # count += 1
+                # cur.append(np.zeros(dim_wordvec))
+            # else: 
+                # cur.append(word_vector[word])
+        
+        # if count == len(batch_X_emb[i]):
+            # print(batch_X_emb[i])
+            # print("not in emb")
+            # exit()
+            
+        # batch_X_emb[i] = cur
+        
         batch_X_emb[i] = [word_vector[w.decode("utf-8")] if w.decode("utf-8") in word_vector else np.zeros(dim_wordvec) for w in batch_X_emb[i]]
         if noise:
             batch_X_emb[i].insert(0, np.random.normal(size=(dim_wordvec,))) # insert random normal at the first step
@@ -101,39 +124,39 @@ def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=Fa
         else:
             for _ in range(len(batch_X_emb[i]), n_encode_lstm_step):
                 batch_X_emb[i].append(np.zeros(dim_wordvec))
-
+                
     current_feats = np.asarray(batch_X_emb, np.float32)
     return current_feats # current_feats is word embedding sequence
 
 def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):
-    current_captions = batch_Y
-    current_captions = map(lambda x: '<bos> ' + x, current_captions)
+    current_captions = copy.deepcopy(batch_Y)   
+    # NOTICE: each element length is n_decode_lstm_step + 1
+    current_caption_matrix = []
+    current_caption_masks = []
+    for idx, words in enumerate(current_captions):
+        current_words_ind = [0] * (n_decode_lstm_step + 1)
+        current_words_msk = np.zeros(n_decode_lstm_step + 1)
+        if not isinstance(words, list):
+            words = words.split()
+        words = ['<bos>'] + words
+        for i in range(n_decode_lstm_step - 1):
+            if i >= len(words): break
+            word = words[i]
+            if word in wordtoix: current_words_ind[i] = wordtoix[word]
+            else: current_words_ind[i] = wordtoix['<unk>']
+            current_words_msk[i] = 1.
+            
+        pos = len(words) if len(words) < n_decode_lstm_step else n_decode_lstm_step - 1
+        # add eos and last column 0 to represent the end of sentence
+        current_words_ind[pos] = wordtoix['<eos>']
+        current_words_msk[pos] = 1.
+        # NOTICE: here also 1
+        current_words_msk[pos+1] = 1.
+        
+        current_caption_matrix.append(current_words_ind)
+        current_caption_masks.append(current_words_msk)
 
-    current_caption_ind = []
-    for idx, each_cap in enumerate(current_captions):
-        current_words_ind = []
-        words = each_cap.lower().split(' ')
-        for word in words:
-            if len(current_words_ind) == n_decode_lstm_step - 1:
-                break
-            if word in wordtoix:
-                current_words_ind.append(wordtoix[word])
-            else:
-                current_words_ind.append(wordtoix['<unk>'])
-        current_words_ind.append(wordtoix['<eos>'])
-        current_caption_ind.append(current_words_ind)
-
-
-    current_caption_matrix = pad_sequences(current_caption_ind, padding='post', maxlen=n_decode_lstm_step)
-    # add a column of zero, means the end of a sentence
-    current_caption_matrix = np.hstack([current_caption_matrix, np.zeros([len(current_caption_matrix), 1])]).astype(int)
-    current_caption_masks = np.zeros((current_caption_matrix.shape[0], current_caption_matrix.shape[1]))
-    nonzeros = np.array(map(lambda x: (x != 0).sum() + 1, current_caption_matrix))
-
-    for ind, row in enumerate(current_caption_masks):
-        row[:nonzeros[ind]] = 1
-
-    return current_caption_matrix, current_caption_masks
+    return np.asarray(current_caption_matrix), np.asarray(current_caption_masks)
 
 
 def get_pmi_kw(sentence, topK=1):
