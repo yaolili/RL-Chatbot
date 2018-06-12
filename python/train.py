@@ -20,9 +20,8 @@ import time
 
 # import our utils, config and model
 from config import *
-import data_parser
 from data_reader import Data_Reader
-from utils import make_batch_X, make_batch_Y
+from utils import make_batch_X, make_batch_Y, preProBuildWordVocab
 
 
 def count_kw():
@@ -86,7 +85,7 @@ def train():
     '''
     build dictionary
     '''
-    w2i, i2w, bias_init_vector = data_parser.preProBuildWordVocab(
+    w2i, i2w, bias_init_vector = preProBuildWordVocab(
         word_count_threshold=word_count_threshold)
     word_vector = KeyedVectors.load_word2vec_format(pre_train_emb, binary=True)
 
