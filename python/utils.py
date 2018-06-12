@@ -10,11 +10,13 @@ import copy
 import config
 import time
 
+'''
 # Load noun tables, pmi_get_keyword co-table as global variable
 keywords = codecs.open(config.all_nouns_path).readlines()
 keywords = [item.strip().split()[0] for item in keywords]
 with open(config.pmi_dict_path, "rb") as fin:
     co_table = pkl.load(fin)
+'''
 
 
 def index2sentence(generated_word_index, prob_logit, ixtoword):
@@ -87,7 +89,8 @@ def pad_sequences(sequences, maxlen=None, dtype='int32', padding='pre', truncati
     return x
 
 
-def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector, noise=False):  # word_vector accept unicode as key
+def make_batch_X(batch_X, n_encode_lstm_step, dim_wordvec, word_vector,
+                 noise=False):  # word_vector accept unicode as key
     batch_X_emb = copy.deepcopy(batch_X)
 
     # print('------')
@@ -183,6 +186,7 @@ def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):
     return current_caption_matrix, current_caption_masks
 
 
+'''
 def get_pmi_kw(sentence, topK=1):
     query_words = sentence.strip().split()
     result = []
@@ -207,6 +211,7 @@ def get_pmi_kw(sentence, topK=1):
         result.append(keywords[max_index])
         pmi_score[max_index] = -1
     return result
+'''
 
 
 def get_textRank_kw(sentence, topK=1):
