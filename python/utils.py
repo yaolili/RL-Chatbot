@@ -185,52 +185,6 @@ def make_batch_Y(batch_Y, wordtoix, n_decode_lstm_step):
 
     return current_caption_matrix, current_caption_masks
 
-	
-def preProBuildWordVocab(word_count_threshold=5, all_words_path=config.all_words_path):
-    # borrowed this function from NeuralTalk
-
-    corpus = open(all_words_path, 'r').read().split('\n')[:-1]
-    captions = np.asarray(corpus, dtype=np.object)
-
-    print('preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold))
-    word_counts = {}
-    nsents = 0
-    for sent in captions:
-        nsents += 1
-        for w in sent.lower().split(' '):
-            word_counts[w] = word_counts.get(w, 0) + 1
-    vocab = [w for w in word_counts if word_counts[w] >= word_count_threshold]
-    print('filtered words from %d to %d' % (len(word_counts), len(vocab)))
-
-    ixtoword = {}
-    ixtoword[0] = '<pad>'
-    ixtoword[1] = '<bos>'
-    ixtoword[2] = '<eos>'
-    ixtoword[3] = '<unk>'
-
-    wordtoix = {}
-    wordtoix['<pad>'] = 0
-    wordtoix['<bos>'] = 1
-    wordtoix['<eos>'] = 2
-    wordtoix['<unk>'] = 3
-
-    for idx, w in enumerate(vocab):
-        wordtoix[w] = idx + 4
-        ixtoword[idx + 4] = w
-
-    word_counts['<pad>'] = nsents
-    word_counts['<bos>'] = nsents
-    word_counts['<eos>'] = nsents
-    word_counts['<unk>'] = nsents
-
-    bias_init_vector = np.array([1.0 * word_counts[ixtoword[i]] for i in ixtoword])
-    bias_init_vector /= np.sum(bias_init_vector)  # normalize to frequencies
-    bias_init_vector = np.log(bias_init_vector)
-    bias_init_vector -= np.max(bias_init_vector)  # shift to nice numeric range
-
-    return wordtoix, ixtoword, bias_init_vector
-	
-	
 
 '''
 def get_pmi_kw(sentence, topK=1):

@@ -18,7 +18,8 @@ from gensim.models import KeyedVectors
 import time
 
 # import our utils, config and model
-from utils import make_batch_X, preProBuildWordVocab
+from utils import make_batch_X
+import data_parser
 from data_reader import Data_Reader
 from config import *
 
@@ -32,7 +33,7 @@ def test():
     load dictionary
     '''
     word_vector = KeyedVectors.load_word2vec_format(pre_train_emb, binary=True)
-    w2i, i2w, bias_init_vector = preProBuildWordVocab(word_count_threshold=word_count_threshold)
+    w2i, i2w, bias_init_vector = data_parser.preProBuildWordVocab(word_count_threshold=word_count_threshold)
 
     '''
     build tf model, saver

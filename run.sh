@@ -7,10 +7,10 @@
 
 
 # training
-python python/train.py rlcw
+python python/train.py -m rlcw
 
 # testing
-python python/test.py rlcw
+python python/test.py -m rlcw
 
 # simulation
-python python/simulate.py rlcw
+python python/simulate.py -m rlcw
